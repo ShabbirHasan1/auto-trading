@@ -16,7 +16,7 @@ impl LocalBoures {
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `k` K 线数据。
-    /// * `min_unit` 最小交易数量。
+    /// * `min_unit` 单笔最小交易数量。
     /// * `return` 旧值
     pub fn insert<S>(
         &mut self,
@@ -38,7 +38,7 @@ impl LocalBoures {
     }
 }
 
-impl core::ops::Deref for LocalBoures {
+impl std::ops::Deref for LocalBoures {
     type Target =
         std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>;
 
@@ -47,7 +47,7 @@ impl core::ops::Deref for LocalBoures {
     }
 }
 
-impl core::ops::DerefMut for LocalBoures {
+impl std::ops::DerefMut for LocalBoures {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
@@ -55,11 +55,10 @@ impl core::ops::DerefMut for LocalBoures {
 
 #[async_trait::async_trait]
 impl Bourse for LocalBoures {
-    // 实现 get_k 方法
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         let product = product.as_ref().to_string();
         self.inner
@@ -76,20 +75,18 @@ impl Bourse for LocalBoures {
             })
     }
 
-    // 实现 get_k_mark 方法
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         self.get_k(product, level, time).await
     }
 
-    // 实现 get_min_unit 方法
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         let product = product.as_ref();
         self.inner

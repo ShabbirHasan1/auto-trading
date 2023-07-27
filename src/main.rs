@@ -51,15 +51,5 @@ impl St {
 
 // #[tokio::main]
 fn main() {
-    let mut st = St::new();
-
-    st.add(MyFn::new(|| {
-        println!("aa");
-    }));
-
-    st.add(MyFn::new(|| {
-        println!("bb");
-    }));
-
-    st.inner.iter().for_each(|v| println!("{}", v.name));
+    println!("{}", (7.4 / 3.1) as u32);
 }

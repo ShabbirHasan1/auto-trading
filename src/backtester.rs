@@ -75,21 +75,33 @@ where
         I: Into<TimeRange>,
     {
         let product = product.as_ref();
+
         let k = self.get_k_range(product, level, time.into()).await?;
+
         let time = k.iter().map(|v| v.time).collect::<Vec<_>>();
+
         let open = k.iter().map(|v| v.open).collect::<Vec<_>>();
+
         let high = k.iter().map(|v| v.high).collect::<Vec<_>>();
+
         let low = k.iter().map(|v| v.low).collect::<Vec<_>>();
+
         let close = k.iter().map(|v| v.close).collect::<Vec<_>>();
 
+        // 单笔最小交易数量
+        let min_unit = self.bourse.get_min_unit(product).await?;
+
+        // 余额
+        let balance = self.config.initial_margin;
+
         // 变量表
-        let mut variable = std::collections::BTreeMap::new();
+        let mut variable = std::collections::HashMap::<&'static str, Value>::new();
 
         // 订单簿
         let order_book = todo!();
 
         // 仓位
-        let position = todo!();
+        let position = Vec::<Position>::new();
 
         for index in (0..time.len()).rev().into_iter() {
             let time = time[index];
@@ -97,58 +109,8 @@ where
             let high = Source::new(&high[index..]);
             let low = Source::new(&low[index..]);
             let close = Source::new(&close[index..]);
-            fn ff() {}
 
-            for (name, strategy) in self.strategy {
-                let order =
-                    |side: Side, price: f64, size: Unit, stop_profit: f64, stop_loss: f64| {
-                        let inner = || -> anyhow::Result<()> {
-                            if price == 0.0 {
-                                if size.is_zero() {
-                                    self.config
-                                        .margin
-                                        .ok_or(anyhow::anyhow!("uninitialized: config.margin"))
-                                } else {
-                                    Ok(size)
-                                }?;
-
-                                Position {
-                                    product: product.to_string(),
-                                    isolated: self.config.isolated,
-                                    lever: self.config.lever,
-                                    side,
-                                    open_price: price,
-                                    close_price: f64::NAN,
-                                    open_quantity: todo!(),
-                                    close_quantity: todo!(),
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    open_time: todo!(),
-                                    close_time: todo!(),
-                                };
-                            } else {
-                                Position {
-                                    product: product.to_string(),
-                                    isolated: self.config.isolated,
-                                    lever: self.config.lever,
-                                    side,
-                                    open_price: price,
-                                    close_price: f64::NAN,
-                                    open_quantity: todo!(),
-                                    close_quantity: todo!(),
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    open_time: todo!(),
-                                    close_time: todo!(),
-                                };
-                            }
-
-                            todo!()
-                        };
-                    };
-            }
-
-            let cx = Context {
+            Context {
                 product,
                 level,
                 time,
@@ -161,6 +123,97 @@ where
                 cancel: todo!(),
                 new_context: todo!(),
             };
+
+            let order =
+                |side: Side, price: f64, margin: Unit, stop_profit: Unit, stop_loss: Unit| {
+                    let mut price = price;
+                    let mut margin = margin;
+
+                    if price == 0.0 {
+                        price = close[0];
+                    }
+
+                    if margin == 0.0 {
+                        margin = self.config.margin;
+                    }
+
+                    let margin = match margin {
+                        Quantity(v) => v,
+                        Proportion(v) => self.config.initial_margin * v,
+                    };
+
+                    // 张转换到 USDT
+                    let min_unit = min_unit * price;
+
+                    // 可开张数
+                    let count = (margin * self.config.lever as f64 / min_unit) as u64;
+
+                    // 持仓量 USDT
+                    let open_quantity = price * count as f64;
+
+                    // 持仓量小于一张
+                    if open_quantity < min_unit {
+                        anyhow::bail!(
+                            "open quantity < min unit: {} USDT < {} USDT",
+                            margin,
+                            min_unit
+                        );
+                    }
+
+                    // 保证金不足
+                    if balance < margin + self.config.fee {
+                        anyhow::bail!(
+                            "balance < margin + fee: {} USDT < {} USDT",
+                            balance,
+                            margin + self.config.fee
+                        );
+                    }
+
+                    match side {
+                        Side::BuyLong => {
+                            if self.config.position_mode {
+                                let mut sum = 0.0;
+                                let mut count = 0.0;
+                                for i in position {
+                                    if i.product == product && i.side == Side::BuyLong {
+                                        sum += i.open_price * i.open_quantity;
+                                        count += 1.0;
+                                    }
+                                }
+                                sum = (sum + close[0]) / (count + 1.0);
+
+                                // 逐仓
+                                if self.config.isolated {}
+
+                                Position {
+                                    product: product.to_string(),
+                                    isolated: self.config.isolated,
+                                    lever: self.config.lever,
+                                    side,
+                                    margin,
+                                    open_price: close[0],
+                                    close_price: 0.0,
+                                    open_quantity,
+                                    liquidation_price: todo!(),
+                                    profit: todo!(),
+                                    profit_ratio: todo!(),
+                                    fee: todo!(),
+                                    open_time: todo!(),
+                                    close_time: todo!(),
+                                    list: todo!(),
+                                };
+                            } else {
+                            }
+                        }
+                        Side::SellShort => {}
+                        Side::SellLong => {}
+                        Side::BuySell => {}
+                    }
+
+                    anyhow::Ok(())
+                };
+
+            for (name, strategy) in self.strategy {}
         }
 
         todo!()

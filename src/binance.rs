@@ -10,7 +10,7 @@ impl crate::Bourse for Binance {
     ) -> anyhow::Result<Vec<crate::K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         todo!()
     }
@@ -23,7 +23,7 @@ impl crate::Bourse for Binance {
     ) -> anyhow::Result<Vec<crate::K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         todo!()
     }
@@ -31,7 +31,7 @@ impl crate::Bourse for Binance {
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: core::marker::Send,
+        S: std::marker::Send,
     {
         todo!()
     }

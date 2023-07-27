@@ -97,11 +97,11 @@ where
     T: AsRef<[f64]>,
 {
     fn from(value: T) -> Self {
-        unsafe { core::mem::transmute(value.as_ref()) }
+        unsafe { std::mem::transmute(value.as_ref()) }
     }
 }
 
-impl core::ops::Deref for Source {
+impl std::ops::Deref for Source {
     type Target = [f64];
 
     fn deref(&self) -> &Self::Target {
@@ -109,7 +109,7 @@ impl core::ops::Deref for Source {
     }
 }
 
-impl core::ops::Index<usize> for Source {
+impl std::ops::Index<usize> for Source {
     type Output = f64;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -117,50 +117,50 @@ impl core::ops::Index<usize> for Source {
     }
 }
 
-impl core::ops::Index<core::ops::Range<usize>> for Source {
+impl std::ops::Index<std::ops::Range<usize>> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::Range<usize>) -> &Self::Output {
+    fn index(&self, index: std::ops::Range<usize>) -> &Self::Output {
         self.index(index)
     }
 }
 
-impl core::ops::Index<core::ops::RangeFrom<usize>> for Source {
+impl std::ops::Index<std::ops::RangeFrom<usize>> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::RangeFrom<usize>) -> &Self::Output {
+    fn index(&self, index: std::ops::RangeFrom<usize>) -> &Self::Output {
         self.index(index)
     }
 }
 
-impl core::ops::Index<core::ops::RangeTo<usize>> for Source {
+impl std::ops::Index<std::ops::RangeTo<usize>> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::RangeTo<usize>) -> &Self::Output {
+    fn index(&self, index: std::ops::RangeTo<usize>) -> &Self::Output {
         self.index(index)
     }
 }
 
-impl core::ops::Index<core::ops::RangeFull> for Source {
+impl std::ops::Index<std::ops::RangeFull> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::RangeFull) -> &Self::Output {
+    fn index(&self, index: std::ops::RangeFull) -> &Self::Output {
         self.index(index)
     }
 }
 
-impl core::ops::Index<core::ops::RangeInclusive<usize>> for Source {
+impl std::ops::Index<std::ops::RangeInclusive<usize>> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::RangeInclusive<usize>) -> &Self::Output {
+    fn index(&self, index: std::ops::RangeInclusive<usize>) -> &Self::Output {
         self.index(index)
     }
 }
 
-impl core::ops::Index<core::ops::RangeToInclusive<usize>> for Source {
+impl std::ops::Index<std::ops::RangeToInclusive<usize>> for Source {
     type Output = Source;
 
-    fn index(&self, index: core::ops::RangeToInclusive<usize>) -> &Self::Output {
+    fn index(&self, index: std::ops::RangeToInclusive<usize>) -> &Self::Output {
         self.index(index)
     }
 }
@@ -342,6 +342,8 @@ impl From<std::ops::RangeToInclusive<u64>> for TimeRange {
 }
 
 /// 订单方向。
+#[derive(Debug, PartialEq, Eq)]
+///
 pub enum Side {
     /// 买入开多。
     BuyLong,
@@ -356,7 +358,63 @@ pub enum Side {
     BuySell,
 }
 
-/// 仓位。
+/// 委托
+pub struct Delegate {
+    /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    pub product: String,
+
+    /// 逐仓。
+    pub isolated: bool,
+
+    /// 杠杆。
+    pub lever: u32,
+
+    /// 持仓方向。
+    pub side: Side,
+
+    /// 委托价格
+    pub price: f64,
+
+    /// 委托数量
+    pub margin: f64,
+
+    /// 子委托 1
+    pub child1: Option<Box<Delegate>>,
+
+    /// 子委托 2
+    pub child2: Option<Box<Delegate>>,
+}
+
+pub struct ChildPosition {
+    /// 持仓方向。
+    pub side: Side,
+
+    /// 保证金
+    pub margin: f64,
+
+    /// 开仓均价。
+    pub open_price: f64,
+
+    /// 平仓均价。
+    pub close_price: f64,
+
+    /// 持仓量。
+    pub open_quantity: f64,
+
+    /// 收益。
+    pub profit: f64,
+
+    /// 收益率。
+    pub profit_ratio: f64,
+
+    /// 开仓时间。
+    pub open_time: u64,
+
+    /// 平仓时间。
+    pub close_time: u64,
+}
+
+ /// 仓位。
 pub struct Position {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
@@ -370,6 +428,9 @@ pub struct Position {
     /// 持仓方向。
     pub side: Side,
 
+    /// 保证金
+    pub margin: f64,
+
     /// 开仓均价。
     pub open_price: f64,
 
@@ -379,8 +440,8 @@ pub struct Position {
     /// 持仓量。
     pub open_quantity: f64,
 
-    /// 平仓量。
-    pub close_quantity: f64,
+    // 强平价格。
+    pub liquidation_price: f64,
 
     /// 收益。
     pub profit: f64,
@@ -388,11 +449,17 @@ pub struct Position {
     /// 收益率。
     pub profit_ratio: f64,
 
+    /// 手续费
+    pub fee: f64,
+
     /// 开仓时间。
     pub open_time: u64,
 
     /// 平仓时间。
     pub close_time: u64,
+
+    /// 清单
+    pub list: Vec<ChildPosition>,
 }
 
 /// 上下文环境。
@@ -418,9 +485,9 @@ pub struct Context<'a> {
     /// 收盘价数据系列。
     pub close: &'a Source,
 
-    pub(crate) variable: &'a mut std::collections::BTreeMap<&'static str, Value>,
+    pub(crate) variable: &'a mut std::collections::HashMap<&'static str, Value>,
 
-    pub(crate) order: &'a dyn Fn(Side, Unit, Unit, Unit, Unit) -> Option<usize>,
+    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit) -> Option<usize>,
 
     pub(crate) cancel: &'a dyn Fn(usize),
 
@@ -432,74 +499,33 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 订单价格，0 表示市价，其他表示限价。
-    /// * `size` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置。
+    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置。
     /// * `stop_profit` 止盈价格，0 表示由 [`Config`] 设置。
     /// * `stop_loss` 止损价格，0 表示由 [`Config`] 设置。
     /// * `return` 订单 id。
-    pub fn order(
-        &self,
-        side: Side,
-        price: Unit,
-        size: Unit,
-        stop_profit: Unit,
-        stop_loss: Unit,
-    ) -> Option<usize> {
-        (self.order)(side, price, size, stop_profit, stop_loss)
-    }
-
-    /// 下单。
-    ///
-    /// * `side` 订单方向。
-    /// * `price` 订单价格，0 表示市价，其他表示限价。
-    /// * `size` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置。
-    /// * `stop_profit` 止盈价格，0 表示由 [`Config`] 设置。
-    /// * `stop_loss` 止损价格，0 表示由 [`Config`] 设置。
-    /// * `return` 订单 id。
-    pub fn order_quantity(
+    pub fn order<I>(
         &self,
         side: Side,
         price: f64,
-        size: f64,
-        stop_profit: f64,
-        stop_loss: f64,
-    ) -> Option<usize> {
+        margin: I,
+        stop_profit: I,
+        stop_loss: I,
+    ) -> Option<usize>
+    where
+        I: Into<Unit>,
+    {
         (self.order)(
             side,
-            Quantity(price),
-            Quantity(size),
-            Quantity(stop_profit),
-            Quantity(stop_loss),
+            price,
+            margin.into(),
+            stop_profit.into(),
+            stop_loss.into(),
         )
     }
 
-    /// 下单。
+    /// 撤销未完成订单。
     ///
-    /// * `side` 订单方向。
-    /// * `price` 订单价格，0 表示市价，其他表示限价。
-    /// * `size` 委托比例，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置。
-    /// * `stop_profit` 止盈比例，0 表示由 [`Config`] 设置。
-    /// * `stop_loss` 止损比例，0 表示由 [`Config`] 设置。
-    /// * `return` 订单 id。
-    pub fn order_proportion(
-        &self,
-        side: Side,
-        price: f64,
-        size: f64,
-        stop_profit: f64,
-        stop_loss: f64,
-    ) -> Option<usize> {
-        (self.order)(
-            side,
-            Proportion(price),
-            Proportion(size),
-            Proportion(stop_profit),
-            Proportion(stop_loss),
-        )
-    }
-
-    /// 撤单。
-    ///
-    /// * `side` 订单 id。
+    /// * `id` 订单 id。
     pub fn cancel(&self, id: usize) {
         (self.cancel)(id)
     }
@@ -536,35 +562,93 @@ impl<'a> std::ops::IndexMut<&'static str> for Context<'a> {
 pub enum Unit {
     Quantity(f64),
     Proportion(f64),
-    Zero,
 }
 
-impl Unit {
-    pub fn is_zero(&self) -> bool {
-        match *self {
-            Quantity(v) => v == 0.0,
-            Proportion(v) => v == 0.0,
-            Zero => true,
+impl From<i8> for Unit {
+    fn from(value: i8) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<u8> for Unit {
+    fn from(value: u8) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<i16> for Unit {
+    fn from(value: i16) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<u16> for Unit {
+    fn from(value: u16) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<i32> for Unit {
+    fn from(value: i32) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<u32> for Unit {
+    fn from(value: u32) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<i64> for Unit {
+    fn from(value: i64) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<u64> for Unit {
+    fn from(value: u64) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<f32> for Unit {
+    fn from(value: f32) -> Self {
+        Quantity(value as f64)
+    }
+}
+
+impl From<f64> for Unit {
+    fn from(value: f64) -> Self {
+        Quantity(value)
+    }
+}
+
+impl std::cmp::PartialEq<f64> for Unit {
+    fn eq(&self, other: &f64) -> bool {
+        match (self, other) {
+            (Self::Quantity(l0), r0) => l0 == r0,
+            (Self::Proportion(l0), r0) => l0 == r0,
         }
     }
 }
 
 pub use Unit::Proportion;
 pub use Unit::Quantity;
-pub use Unit::Zero;
 
 /// 交易配置，参数可以不设置，这取决于你的策略。
 /// 例如，你的策略需要下单，但没有设置 `initial_margin` 和 `margin` 属性，则下单失败。
 pub struct Config {
-    pub(crate) initial_margin: f64,
-    pub(crate) isolated: bool,
-    pub(crate) lever: u32,
-    pub(crate) fee: f64,
-    pub(crate) deviation: f64,
-    pub(crate) margin: Option<Unit>,
-    pub(crate) max_margin: Option<Unit>,
-    pub(crate) stop_profit: Option<Unit>,
-    pub(crate) stop_loss: Option<Unit>,
+    pub initial_margin: f64,
+    pub isolated: bool,
+    pub position_mode: bool,
+    pub lever: u32,
+    pub fee: f64,
+    pub deviation: f64,
+    pub margin: Unit,
+    pub max_margin: Unit,
+    pub stop_profit: Unit,
+    pub stop_loss: Unit,
 }
 
 impl Config {
@@ -572,13 +656,14 @@ impl Config {
         Config {
             initial_margin: 0.0,
             isolated: false,
+            position_mode: false,
             lever: 1,
             fee: 0.0,
-            deviation: 0.0,
-            margin: None,
-            max_margin: None,
-            stop_profit: None,
-            stop_loss: None,
+            deviation: 1.0,
+            margin: 0.into(),
+            max_margin: 0.into(),
+            stop_profit: 0.into(),
+            stop_loss: 0.into(),
         }
     }
 
@@ -594,6 +679,14 @@ impl Config {
         self
     }
 
+    /// 仓位模式
+    ///
+    /// * `value` true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位，false 表示买卖模式，一个合约仅可持有一个方向的仓位。
+    pub fn position_mode(mut self, value: bool) -> Self {
+        self.position_mode = value;
+        self
+    }
+
     /// 杠杆。
     pub fn lever(mut self, value: u32) -> Self {
         self.lever = value;
@@ -606,81 +699,45 @@ impl Config {
         self
     }
 
-    /// 滑点。
+    /// 滑点比例。
     pub fn deviation(mut self, value: f64) -> Self {
         self.deviation = value;
         self
     }
 
     /// 每次开单投入的保证金。
-    pub fn margin(mut self, value: Unit) -> Self {
-        self.margin = Some(value);
+    pub fn margin<I>(mut self, value: I) -> Self
+    where
+        I: Into<Unit>,
+    {
+        self.margin = value.into();
         self
     }
 
     /// 最大投入的保证金数量，超过后将开单失败。
-    pub fn max_margin(mut self, value: Unit) -> Self {
-        self.max_margin = Some(value);
+    pub fn max_margin<I>(mut self, value: I) -> Self
+    where
+        I: Into<Unit>,
+    {
+        self.max_margin = value.into();
         self
     }
 
     /// 单笔止盈数量。
-    pub fn stop_profit(mut self, value: Unit) -> Self {
-        self.stop_profit = Some(value);
+    pub fn stop_profit<I>(mut self, value: I) -> Self
+    where
+        I: Into<Unit>,
+    {
+        self.stop_profit = value.into();
         self
     }
 
     /// 单笔止损数量。
-    pub fn stop_loss(mut self, value: Unit) -> Self {
-        self.stop_loss = Some(value);
-        self
-    }
-
-    /// 每次开单投入的保证金。
-    pub fn margin_quantity(mut self, value: f64) -> Self {
-        self.margin = Some(Unit::Quantity(value));
-        self
-    }
-
-    /// 每次开单投入的保证金比例。
-    pub fn margin_proportion(mut self, value: f64) -> Self {
-        self.margin = Some(Unit::Proportion(value));
-        self
-    }
-
-    /// 最大投入的保证金数量，超过后将开单失败。
-    pub fn max_margin_quantity(mut self, value: f64) -> Self {
-        self.max_margin = Some(Unit::Quantity(value));
-        self
-    }
-
-    /// 最大保证金比例，超过后将开单失败。
-    pub fn max_margin_proportion(mut self, value: f64) -> Self {
-        self.max_margin = Some(Unit::Proportion(value));
-        self
-    }
-
-    /// 单笔止盈数量。
-    pub fn stop_profit_quantity(mut self, value: f64) -> Self {
-        self.stop_profit = Some(Unit::Quantity(value));
-        self
-    }
-
-    /// 单笔止盈比例。
-    pub fn stop_profit_proportion(mut self, value: f64) -> Self {
-        self.stop_profit = Some(Unit::Proportion(value));
-        self
-    }
-
-    /// 单笔止损数量。
-    pub fn stop_loss_quantity(mut self, value: f64) -> Self {
-        self.stop_loss = Some(Unit::Quantity(value));
-        self
-    }
-
-    /// 单笔止损比例。
-    pub fn stop_loss_proportion(mut self, value: f64) -> Self {
-        self.stop_loss = Some(Unit::Proportion(value));
+    pub fn stop_loss<I>(mut self, value: I) -> Self
+    where
+        I: Into<Unit>,
+    {
+        self.stop_loss = value.into();
         self
     }
 }
@@ -697,7 +754,7 @@ pub trait Bourse {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send;
+        S: std::marker::Send;
 
     /// 获取 K 线标记价格。
     ///
@@ -708,13 +765,13 @@ pub trait Bourse {
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: core::marker::Send;
+        S: std::marker::Send;
 
-    /// 获取最小交易数量。
+    /// 获取单笔最小交易数量。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: core::marker::Send;
+        S: std::marker::Send;
 }
