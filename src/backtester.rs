@@ -12,6 +12,8 @@ impl<T> Backtester<T>
 where
     T: Bourse,
 {
+    /// 构造回测器。
+    ///
     /// * `bourse` 交易所。
     pub fn new(bourse: T) -> Self {
         Self {

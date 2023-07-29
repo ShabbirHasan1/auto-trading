@@ -502,31 +502,21 @@ pub struct Context<'a> {
 
     pub(crate) variable: &'a mut std::collections::HashMap<&'static str, Value>,
 
-    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit) -> Option<usize>,
+    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> Option<usize>,
 
     pub(crate) cancel: &'a dyn Fn(usize),
 
     pub(crate) new_context: &'a dyn Fn(&str, Level, u64) -> &Context,
 }
 
-// TODO: 回测器要不要忽略 order 的 stop_profit 和 stop_loss 呢？在价格到达时，强制平仓？
 impl<'a> Context<'a> {
     /// 下单。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
-    /// * `stop_profit` 止盈委托价格，0 表示由 [`Config`] 设置。
-    /// * `stop_loss` 止损委托价格，0 表示由 [`Config`] 设置。
     /// * `return` 订单 id。
-    pub fn order<A, B, C>(
-        &self,
-        side: Side,
-        price: f64,
-        margin: A,
-        stop_profit: B,
-        stop_loss: C,
-    ) -> Option<usize>
+    pub fn order<A, B, C>(&self, side: Side, price: f64, margin: A) -> Option<usize>
     where
         A: Into<Unit>,
         B: Into<Unit>,
@@ -536,20 +526,22 @@ impl<'a> Context<'a> {
             side,
             price,
             margin.into(),
-            stop_profit.into(),
-            stop_loss.into(),
+            0.into(),
+            0.into(),
+            0.into(),
+            0.into(),
         )
     }
 
-    /// 下单。
+    /// 下单，止盈止损的委托价格不能超过 [`Config`] 的约束，否则下单失败。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
     /// * `stop_profit_condition` 止盈触发价格
     /// * `stop_loss_condition` 止损触发价格
-    /// * `stop_profit` 止盈委托价格
-    /// * `stop_loss` 止损价委托格
+    /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
+    /// * `stop_loss` 止损价委托格，0 表示市价，其他表示限价。
     /// * `return` 订单 id。
     pub fn order_condition<A, B, C, D, E>(
         &self,
@@ -568,13 +560,15 @@ impl<'a> Context<'a> {
         D: Into<Unit>,
         E: Into<Unit>,
     {
-        // (self.order)(
-        //     side,
-        //     price,
-        //     margin.into(),
-        //     stop_profit.into(),
-        //     stop_loss.into(),
-        // )
+        (self.order)(
+            side,
+            price,
+            margin.into(),
+            stop_profit_condition.into(),
+            stop_loss_condition.into(),
+            stop_profit.into(),
+            stop_loss.into(),
+        )
     }
 
     /// 撤销未完成订单。
@@ -745,9 +739,7 @@ impl Config {
         self
     }
 
-    /// 仓位模式
-    ///
-    /// * `value` true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位，false 表示买卖模式，一个合约仅可持有一个方向的仓位。
+    /// 仓位模式，true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位，false 表示买卖模式，一个合约仅可持有一个方向的仓位。
     pub fn position_mode(mut self, value: bool) -> Self {
         self.position_mode = value;
         self
