@@ -363,8 +363,8 @@ impl Side {
         match self {
             Side::BuyLong => 1.0,
             Side::SellShort => -1.0,
-            Side::SellLong => panic!("SellLong could not get factor"),
-            Side::BuySell => panic!("BuySell could not get factor"),
+            Side::SellLong => panic!("sell long cannot get factor"),
+            Side::BuySell => panic!("buy sell cannot get factor"),
         }
     }
 }
@@ -390,11 +390,17 @@ pub struct Delegate {
     /// 委托数量
     pub margin: f64,
 
-    /// 子委托 1
-    pub child1: Option<Box<Delegate>>,
+    /// 止盈触发价
+    pub stop_profit_condition: f64,
 
-    /// 子委托 2
-    pub child2: Option<Box<Delegate>>,
+    /// 止损触发价
+    pub stop_loss_condition: f64,
+
+    /// 止盈委托价
+    pub stop_profit: f64,
+
+    /// 止损委托价
+    pub stop_loss: f64,
 }
 
 /// 清单仓位。
@@ -512,17 +518,18 @@ impl<'a> Context<'a> {
     /// * `stop_profit` 止盈价格，0 表示由 [`Config`] 设置。
     /// * `stop_loss` 止损价格，0 表示由 [`Config`] 设置。
     /// * `return` 订单 id。
-    pub fn order<I>(
+    pub fn order<A, B, C>(
         &self,
         side: Side,
         price: f64,
-        margin: I,
-        stop_profit: I,
-        stop_loss: I,
+        margin: A,
+        stop_profit: B,
+        stop_loss: C,
     ) -> Option<usize>
     where
-        I: Into<Unit>,
-        // TODO: 一个 I 真的可以？
+        A: Into<Unit>,
+        B: Into<Unit>,
+        C: Into<Unit>,
     {
         (self.order)(
             side,
@@ -724,36 +731,36 @@ impl Config {
     }
 
     /// 每次开单投入的保证金。
-    pub fn margin<I>(mut self, value: I) -> Self
+    pub fn margin<T>(mut self, value: T) -> Self
     where
-        I: Into<Unit>,
+        T: Into<Unit>,
     {
         self.margin = value.into();
         self
     }
 
     /// 最大投入的保证金数量，超过后将开单失败。
-    pub fn max_margin<I>(mut self, value: I) -> Self
+    pub fn max_margin<T>(mut self, value: T) -> Self
     where
-        I: Into<Unit>,
+        T: Into<Unit>,
     {
         self.max_margin = value.into();
         self
     }
 
     /// 单笔止盈数量。
-    pub fn stop_profit<I>(mut self, value: I) -> Self
+    pub fn stop_profit<T>(mut self, value: T) -> Self
     where
-        I: Into<Unit>,
+        T: Into<Unit>,
     {
         self.stop_profit = value.into();
         self
     }
 
     /// 单笔止损数量。
-    pub fn stop_loss<I>(mut self, value: I) -> Self
+    pub fn stop_loss<T>(mut self, value: T) -> Self
     where
-        I: Into<Unit>,
+        T: Into<Unit>,
     {
         self.stop_loss = value.into();
         self

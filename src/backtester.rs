@@ -179,18 +179,7 @@ where
 
                                 // ------------------------
 
-                                Delegate {
-                                    product: product.to_string(),
-                                    isolated: self.config.isolated,
-                                    lever: self.config.lever,
-                                    side,
-                                    price,
-                                    margin,
-                                    child1: None,
-                                    child2: None,
-                                };
-
-                                // -----------------------
+                                // ------------------------
 
                                 // 张换算到 USDT
                                 let min_unit = min_unit * open_price;
