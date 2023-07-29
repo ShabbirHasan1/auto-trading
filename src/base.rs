@@ -509,14 +509,15 @@ pub struct Context<'a> {
     pub(crate) new_context: &'a dyn Fn(&str, Level, u64) -> &Context,
 }
 
+// TODO: 回测器要不要忽略 order 的 stop_profit 和 stop_loss 呢？在价格到达时，强制平仓？
 impl<'a> Context<'a> {
     /// 下单。
     ///
     /// * `side` 订单方向。
-    /// * `price` 订单价格，0 表示市价，其他表示限价。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
-    /// * `stop_profit` 止盈价格，0 表示由 [`Config`] 设置。
-    /// * `stop_loss` 止损价格，0 表示由 [`Config`] 设置。
+    /// * `stop_profit` 止盈委托价格，0 表示由 [`Config`] 设置。
+    /// * `stop_loss` 止损委托价格，0 表示由 [`Config`] 设置。
     /// * `return` 订单 id。
     pub fn order<A, B, C>(
         &self,
@@ -538,6 +539,42 @@ impl<'a> Context<'a> {
             stop_profit.into(),
             stop_loss.into(),
         )
+    }
+
+    /// 下单。
+    ///
+    /// * `side` 订单方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
+    /// * `stop_profit_condition` 止盈触发价格
+    /// * `stop_loss_condition` 止损触发价格
+    /// * `stop_profit` 止盈委托价格
+    /// * `stop_loss` 止损价委托格
+    /// * `return` 订单 id。
+    pub fn order_condition<A, B, C, D, E>(
+        &self,
+        side: Side,
+        price: f64,
+        margin: A,
+        stop_profit_condition: B,
+        stop_loss_condition: C,
+        stop_profit: D,
+        stop_loss: E,
+    ) -> Option<usize>
+    where
+        A: Into<Unit>,
+        B: Into<Unit>,
+        C: Into<Unit>,
+        D: Into<Unit>,
+        E: Into<Unit>,
+    {
+        // (self.order)(
+        //     side,
+        //     price,
+        //     margin.into(),
+        //     stop_profit.into(),
+        //     stop_loss.into(),
+        // )
     }
 
     /// 撤销未完成订单。
