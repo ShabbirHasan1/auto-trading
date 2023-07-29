@@ -16,9 +16,11 @@ impl Okx {
         })
     }
 
-    pub fn client(mut self, client: reqwest::Client) -> Self {
-        self.client = client;
-        self
+    pub fn with_client(client: reqwest::Client) -> Self {
+        Self {
+            client,
+            base_url: "https://www.okx.com".to_string(),
+        }
     }
 
     pub fn base_url<S>(mut self, base_url: S) -> Self
@@ -227,7 +229,7 @@ impl Bourse for Okx {
                 .ok_or(anyhow::anyhow!("interface exception"))?
                 .parse::<f64>()?
         } else {
-            result["data"][0]["lotSz"]
+            result["data"][0]["minSz"]
                 .as_str()
                 .ok_or(anyhow::anyhow!("interface exception"))?
                 .parse::<f64>()?
@@ -275,6 +277,6 @@ mod tests {
         let x = okx.get_min_unit("BTC-USDT-SWAP").await.unwrap();
         assert!(x == 0.01);
         let x = okx.get_min_unit("BTC-USDT").await.unwrap();
-        assert!(x == 0.00000001);
+        assert!(x == 0.00001);
     }
 }

@@ -342,8 +342,7 @@ impl From<std::ops::RangeToInclusive<u64>> for TimeRange {
 }
 
 /// 订单方向。
-#[derive(Debug, PartialEq, Eq)]
-///
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Side {
     /// 买入开多。
     BuyLong,
@@ -358,7 +357,20 @@ pub enum Side {
     BuySell,
 }
 
+impl Side {
+    /// 获取用以计算多空仓位的乘数
+    pub fn factor(&self) -> f64 {
+        match self {
+            Side::BuyLong => 1.0,
+            Side::SellShort => -1.0,
+            Side::SellLong => panic!("SellLong could not get factor"),
+            Side::BuySell => panic!("BuySell could not get factor"),
+        }
+    }
+}
+
 /// 委托
+#[derive(Debug, Clone)]
 pub struct Delegate {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
@@ -385,6 +397,8 @@ pub struct Delegate {
     pub child2: Option<Box<Delegate>>,
 }
 
+/// 清单仓位。
+#[derive(Debug, Clone)]
 pub struct ChildPosition {
     /// 持仓方向。
     pub side: Side,
@@ -392,14 +406,11 @@ pub struct ChildPosition {
     /// 保证金
     pub margin: f64,
 
-    /// 开仓均价。
-    pub open_price: f64,
-
-    /// 平仓均价。
-    pub close_price: f64,
+    /// 均价。
+    pub price: f64,
 
     /// 持仓量。
-    pub open_quantity: f64,
+    pub quantity: f64,
 
     /// 收益。
     pub profit: f64,
@@ -407,14 +418,12 @@ pub struct ChildPosition {
     /// 收益率。
     pub profit_ratio: f64,
 
-    /// 开仓时间。
-    pub open_time: u64,
-
-    /// 平仓时间。
-    pub close_time: u64,
+    /// 时间。
+    pub time: u64,
 }
 
- /// 仓位。
+/// 仓位。
+#[derive(Debug, Clone)]
 pub struct Position {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
@@ -499,7 +508,7 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 订单价格，0 表示市价，其他表示限价。
-    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置。
+    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
     /// * `stop_profit` 止盈价格，0 表示由 [`Config`] 设置。
     /// * `stop_loss` 止损价格，0 表示由 [`Config`] 设置。
     /// * `return` 订单 id。
@@ -513,6 +522,7 @@ impl<'a> Context<'a> {
     ) -> Option<usize>
     where
         I: Into<Unit>,
+        // TODO: 一个 I 真的可以？
     {
         (self.order)(
             side,
@@ -546,14 +556,14 @@ impl<'a> std::ops::Index<&'static str> for Context<'a> {
 
     fn index(&self, index: &'static str) -> &Self::Output {
         debug_assert!(self.variable.contains_key(index), "变量不存在: {}", index);
-        unsafe { self.variable.get(index).unwrap_unchecked() }
+        self.variable.get(index).unwrap()
     }
 }
 
 impl<'a> std::ops::IndexMut<&'static str> for Context<'a> {
     fn index_mut(&mut self, index: &'static str) -> &mut Self::Output {
         debug_assert!(self.variable.contains_key(index), "变量不存在: {}", index);
-        unsafe { self.variable.get_mut(index).unwrap_unchecked() }
+        self.variable.get_mut(index).unwrap()
     }
 }
 
@@ -645,6 +655,7 @@ pub struct Config {
     pub lever: u32,
     pub fee: f64,
     pub deviation: f64,
+    pub maintenance: f64,
     pub margin: Unit,
     pub max_margin: Unit,
     pub stop_profit: Unit,
@@ -660,6 +671,7 @@ impl Config {
             lever: 1,
             fee: 0.0,
             deviation: 1.0,
+            maintenance: 1.0,
             margin: 0.into(),
             max_margin: 0.into(),
             stop_profit: 0.into(),
@@ -702,6 +714,12 @@ impl Config {
     /// 滑点比例。
     pub fn deviation(mut self, value: f64) -> Self {
         self.deviation = value;
+        self
+    }
+
+    /// 维持保证金率
+    pub fn maintenance(mut self, value: f64) -> Self {
+        self.maintenance = value;
         self
     }
 
@@ -770,6 +788,7 @@ pub trait Bourse {
     /// 获取单笔最小交易数量。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `return` 1张 = 价格 * 返回值
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
