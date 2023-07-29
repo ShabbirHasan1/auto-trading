@@ -571,7 +571,7 @@ impl<'a> Context<'a> {
         )
     }
 
-    /// 撤销未完成订单。
+    /// 撤销未完成的订单。
     ///
     /// * `id` 订单 id。
     pub fn cancel(&self, id: usize) {
