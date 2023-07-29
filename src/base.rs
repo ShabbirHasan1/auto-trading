@@ -358,7 +358,7 @@ pub enum Side {
 }
 
 impl Side {
-    /// 获取用以计算多空仓位的乘数
+    /// 获取用以计算多空仓位的乘数。
     pub fn factor(&self) -> f64 {
         match self {
             Side::BuyLong => 1.0,
@@ -388,18 +388,18 @@ pub struct Delegate {
     pub price: f64,
 
     /// 委托数量
-    pub margin: f64,
+    pub quantity: f64,
 
-    /// 止盈触发价
+    /// 止盈触发价。
     pub stop_profit_condition: f64,
 
-    /// 止损触发价
+    /// 止损触发价。
     pub stop_loss_condition: f64,
 
-    /// 止盈委托价
+    /// 止盈委托价，0 表示市价。
     pub stop_profit: f64,
 
-    /// 止损委托价
+    /// 止损委托价，0 表示市价。
     pub stop_loss: f64,
 }
 
@@ -579,6 +579,16 @@ impl<'a> std::ops::IndexMut<&'static str> for Context<'a> {
 pub enum Unit {
     Quantity(f64),
     Proportion(f64),
+}
+
+impl Unit {
+    /// 转换到数量。
+    pub fn to_quantity(self, value: f64) -> f64 {
+        match self {
+            Quantity(v) => v,
+            Proportion(v) => v * value,
+        }
+    }
 }
 
 impl From<i8> for Unit {
