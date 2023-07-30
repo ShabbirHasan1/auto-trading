@@ -367,6 +367,16 @@ impl Side {
             Side::BuySell => panic!("buy sell cannot get factor"),
         }
     }
+
+    /// 获取用以计算多空仓位的乘数。
+    pub fn neg(&self) -> Side {
+        match self {
+            Side::BuyLong => Side::BuySell,
+            Side::SellShort => Side::SellLong,
+            Side::SellLong => panic!("sell long cannot get neg"),
+            Side::BuySell => panic!("buy sell cannot get neg"),
+        }
+    }
 }
 
 /// 委托
@@ -502,7 +512,8 @@ pub struct Context<'a> {
 
     pub(crate) variable: &'a mut std::collections::HashMap<&'static str, Value>,
 
-    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> Option<usize>,
+    pub(crate) order:
+        &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<Option<usize>>,
 
     pub(crate) cancel: &'a dyn Fn(usize),
 
@@ -514,18 +525,12 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
-    /// * `return` 订单 id。
-    pub fn order<A, B, C>(&self, side: Side, price: f64, margin: A) -> Option<usize>
-    where
-        A: Into<Unit>,
-        B: Into<Unit>,
-        C: Into<Unit>,
-    {
+    /// * `return` 订单 id，如果是市价单，则返回 None。
+    pub fn order(&self, side: Side, price: f64) -> anyhow::Result<Option<usize>> {
         (self.order)(
             side,
             price,
-            margin.into(),
+            0.into(),
             0.into(),
             0.into(),
             0.into(),
@@ -537,12 +542,12 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `margin` 委托数量，单位 USDT，如果交易产品是合约，则会自动换算成张，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部数量。
+    /// * `margin` 委托数量，单位 USDT，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部平仓。
     /// * `stop_profit_condition` 止盈触发价格
     /// * `stop_loss_condition` 止损触发价格
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
     /// * `stop_loss` 止损价委托格，0 表示市价，其他表示限价。
-    /// * `return` 订单 id。
+    /// * `return` 订单 id，如果是市价单，则返回 None。
     pub fn order_condition<A, B, C, D, E>(
         &self,
         side: Side,
@@ -552,7 +557,7 @@ impl<'a> Context<'a> {
         stop_loss_condition: C,
         stop_profit: D,
         stop_loss: E,
-    ) -> Option<usize>
+    ) -> anyhow::Result<Option<usize>>
     where
         A: Into<Unit>,
         B: Into<Unit>,
