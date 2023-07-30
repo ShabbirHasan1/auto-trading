@@ -539,28 +539,42 @@ impl MatchmakingEngine {
         self.delegate.push(value);
     }
 
-    pub fn update(&mut self, product: &str, price: f64) {
+    /// 处理。
+    ///
+    /// * `pair` 交易产品和价格。
+    pub fn update<T>(&mut self, pair: T)
+    where
+        T: AsRef<[(String, f64)]>,
+    {
+        let pair = pair.as_ref();
+
         // 计算盈亏
-        for i in self.position.iter_mut().filter(|v| v.product == product) {
-            i.profit = (price - i.open_price) * i.open_quantity;
-            i.profit_ratio = i.profit / i.margin;
+        for (product, price) in pair {
+            for i in self.position.iter_mut().filter(|v| &v.product == product) {
+                i.profit = (price - i.open_price) * i.open_quantity;
+                i.profit_ratio = i.profit / i.margin;
+            }
         }
 
         // 历史仓位
-        let mut history = Vec::new();
+        let history = Vec::<Position>::new();
 
-        self.position.iter().filter(|v| {
-            if v.side == Side::BuyLong && price >= v.liquidation_price
-                || price <= v.liquidation_price
-            {
-                if v.isolated {
-                    v.close_price = v.liquidation_price;
-                } else {
-                    v.close_price = price;
+        for (product, price) in pair {
+            for i in self.position.iter_mut().rev() {
+                if i.side == Side::BuyLong && *price >= i.liquidation_price
+                    || *price <= i.liquidation_price
+                {
+                    if i.isolated {
+                        i.close_price = i.liquidation_price;
+                    } else {
+                        i.close_price = *price;
+                    }
                 }
             }
-            true
-        });
+        }
+
+        // // 历史仓位
+        // let mut history = Vec::new();
 
         // 处理委托
     }
