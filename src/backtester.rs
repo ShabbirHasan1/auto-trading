@@ -4,6 +4,7 @@ use crate::*;
 pub struct Backtester<T> {
     bourse: T,
     mark_price: bool,
+    other_product: bool,
     config: Config,
     strategy: Vec<(String, Box<dyn Fn(&Context)>)>,
 }
@@ -19,6 +20,7 @@ where
         Self {
             bourse,
             mark_price: false,
+            other_product: false,
             config: Config::new(),
             strategy: Vec::new(),
         }
@@ -27,6 +29,12 @@ where
     /// 使用标记价格。
     pub fn mark_price(mut self, value: bool) -> Self {
         self.mark_price = value;
+        self
+    }
+
+    /// 允许策略下单 [`start`] 之外的交易产品。
+    pub fn other_product(mut self, value: bool) -> Self {
+        self.other_product = value;
         self
     }
 
@@ -532,8 +540,6 @@ impl MatchmakingEngine {
     }
 
     pub fn update(&mut self, product: &str, price: f64) {
-        // TODO: 允许策略下单其他交易产品？？？
-
         // 计算盈亏
         for i in self.position.iter_mut().filter(|v| v.product == product) {
             i.profit = (price - i.open_price) * i.open_quantity;
@@ -541,22 +547,20 @@ impl MatchmakingEngine {
         }
 
         // 历史仓位
-        // let mut history = Vec::new();
+        let mut history = Vec::new();
 
-        // let all = false;
-
-        // self.position.iter().filter(|v| {
-        //     if v.side == Side::BuyLong && price >= v.liquidation_price
-        //         || price <= v.liquidation_price
-        //     {
-        //         if v.isolated {
-        //             v.close_price = v.liquidation_price;
-        //         } else {
-        //             v.close_price = price;
-        //         }
-        //     }
-        //     true
-        // });
+        self.position.iter().filter(|v| {
+            if v.side == Side::BuyLong && price >= v.liquidation_price
+                || price <= v.liquidation_price
+            {
+                if v.isolated {
+                    v.close_price = v.liquidation_price;
+                } else {
+                    v.close_price = price;
+                }
+            }
+            true
+        });
 
         // 处理委托
     }

@@ -583,7 +583,7 @@ impl<'a> Context<'a> {
         (self.cancel)(id)
     }
 
-    /// 创建新的上下文环境，继承当前的上下文变量表。
+    /// 创建新的上下文环境，继承当前的上下文变量表，如果要下单其他交易产品，则要将 [`Backtester`] 中的 [`other_product`] 设置为 true，否则下单失败。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
