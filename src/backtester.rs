@@ -3,10 +3,9 @@ use crate::*;
 /// 回测器。
 pub struct Backtester<T> {
     bourse: T,
+    config: Config,
     mark_price: bool,
     other_product: bool,
-    config: Config,
-    strategy: Vec<(String, Box<dyn Fn(&Context)>)>,
 }
 
 impl<T> Backtester<T>
@@ -16,13 +15,13 @@ where
     /// 构造回测器。
     ///
     /// * `bourse` 交易所。
-    pub fn new(bourse: T) -> Self {
+    /// * `config` 交易配置。
+    pub fn new(bourse: T, config: Config) -> Self {
         Self {
             bourse,
+            config,
             mark_price: false,
             other_product: false,
-            config: Config::new(),
-            strategy: Vec::new(),
         }
     }
 
@@ -32,69 +31,44 @@ where
         self
     }
 
-    /// 允许策略下单 [`start`] 之外的交易产品。
+    /// 允许策略下单 `start` 函数参数中 `product` 之外的交易产品。
     pub fn other_product(mut self, value: bool) -> Self {
         self.other_product = value;
         self
     }
 
-    /// 交易配置。
-    pub fn config(mut self, value: Config) -> Self {
-        self.config = value;
-        self
-    }
-
-    /// 添加策略。
-    pub fn strategy<S>(mut self, value: S) -> Self
-    where
-        S: Fn(&Context) + 'static,
-    {
-        self.strategy.push((
-            format!("unnamed strategy {}", self.strategy.len()),
-            Box::new(value),
-        ));
-        self
-    }
-
-    /// 添加策略。
-    ///
-    /// * `name` 策略名字。
-    pub fn strategy_name<N, S>(mut self, name: N, value: S) -> Self
-    where
-        N: AsRef<str>,
-        S: Fn(&Context) + 'static,
-    {
-        self.strategy
-            .push((name.as_ref().to_string(), Box::new(value)));
-        self
-    }
-
     /// 开始回测。
     ///
+    /// * `strategy` 策略。
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `level` 时间级别。
+    /// * `strategy_level` 策略的时间级别。
+    /// * `backtester_level` 回测器的精度。
     /// * `time` 获取这个时间范围之内的数据，0 表示获取所有数据。
     /// * `return` 回测结果，如果 [`Config`] 的某些参数未设置，且策略依赖这些参数，将返回错误。
-    pub async fn start<S, I>(
+    pub async fn start<F, S, I>(
         &self,
+        strategy: F,
         product: S,
-        level: Level,
+        strategy_level: Level,
+        backtester_level: Level,
         time: I,
     ) -> anyhow::Result<Vec<Position>>
     where
+        F: Fn(&Context),
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
-        // 撮合引擎
-        // 策略执行
-
         // TODO: 如何兼容现货和合约？
         // TODO: 如何实现交割合约和期权合约？
         // TODO: 要不要支持移动止盈止损？
         // TODO: 触发限价委托，不占用保证金，但是官方没有这个接口？？？？？？
 
         let product = product.as_ref();
-        let k = self.get_k_range(product, level, time.into()).await?;
+
+        let k = self
+            .get_k_range(product, strategy_level, time.into())
+            .await?;
+
         let time = k.iter().map(|v| v.time).collect::<Vec<_>>();
         let open = k.iter().map(|v| v.open).collect::<Vec<_>>();
         let high = k.iter().map(|v| v.high).collect::<Vec<_>>();
@@ -104,19 +78,11 @@ where
         // 单笔最小交易数量
         let min_unit = self.bourse.get_min_unit(product).await?;
 
-        // 余额
-        let mut balance = self.config.initial_margin;
-
-        // let balance = &mut _balance;
-
         // 变量表
         let mut variable = std::collections::HashMap::<&'static str, Value>::new();
 
-        // 仓位
-        let mut position = Vec::<Position>::new();
-
-        // 订单簿
-        let mut order_book = Vec::<Delegate>::new();
+        // 撮合引擎
+        let mut me = MatchmakingEngine::new(self.config);
 
         for index in (0..time.len()).rev().into_iter() {
             let time = time[index];
@@ -125,316 +91,65 @@ where
             let low = Source::new(&low[index..]);
             let close = Source::new(&close[index..]);
 
-            Context {
+            let mut order = |side,
+                             mut price: f64,
+                             quantity: Unit,
+                             stop_profit_condition: Unit,
+                             stop_loss_condition: Unit,
+                             stop_profit: Unit,
+                             stop_loss: Unit| {
+                if price == 0.0 {
+                    price = close[0];
+                }
+
+                let quantity =
+                    quantity.to_quantity(self.config.initial_margin) * self.config.lever as f64;
+
+                me.delegate(Delegate {
+                    product: product.to_string(),
+                    isolated: self.config.isolated,
+                    lever: self.config.lever,
+                    side,
+                    price,
+                    quantity,
+                    margin: quantity / self.config.lever as f64,
+                    stop_profit_condition: price
+                        + stop_profit_condition.to_quantity(price) * side.factor(),
+                    stop_loss_condition: price
+                        + stop_loss_condition.to_quantity(price) * side.factor(),
+                    stop_profit: price + stop_profit.to_quantity(price) * side.factor(),
+                    stop_loss: price + stop_loss.to_quantity(price) * side.factor(),
+                })
+            };
+
+            let cx = Context {
                 product,
-                level,
+                level: strategy_level,
                 time,
                 open,
                 high,
                 low,
                 close,
                 variable: &mut variable,
-                order: todo!(),
+                order: &mut order,
                 cancel: todo!(),
                 new_context: todo!(),
             };
 
-            let mut order = |side: Side,
-                             price: f64,
-                             margin: Unit,
-                             stop_profit_condition: Unit,
-                             stop_loss_condition: Unit,
-                             stop_profit: Unit,
-                             stop_loss: Unit| {
-                // 计算开仓均价
-                let avg_open_price =
-                    |product: &str, side: Side, open_price: f64, open_quantity: f64| {
-                        if let Some((i, v)) = position.iter().enumerate().find(|v| {
-                            v.1.product == product
-                                && if self.config.position_mode {
-                                    v.1.side == side
-                                } else {
-                                    true
-                                }
-                        }) {
-                            let quantity = v.open_quantity - open_quantity;
-
-                            let side = if quantity == 0.0 {
-                                side
-                            } else if quantity > 0.0 {
-                                Side::BuyLong
-                            } else {
-                                Side::SellShort
-                            };
-
-                            let a = v.open_price * v.open_quantity * side.factor();
-                            let b = open_price * open_quantity * side.factor();
-                            let open_price = (a + b) / 2.0;
-
-                            return (i, side, open_price, quantity.abs());
-                        }
-
-                        (usize::MAX, side, open_price, open_quantity)
-                    };
-
-                // TODO: 单向持仓的话，如果多空一起开，会先平掉其中一个仓位
-                if self.config.isolated {
-                    match side {
-                        Side::BuyLong | Side::SellShort => {
-                            // 限价或市价
-                            let price =
-                                if price == 0.0 { close[0] } else { price } * self.config.deviation;
-
-                            // 单笔投入的保证金
-                            let margin = if margin == 0.0 {
-                                self.config.margin
-                            } else {
-                                margin
-                            }
-                            .to_quantity(self.config.initial_margin);
-
-                            // 张换算到 USDT
-                            let min_unit = min_unit * price;
-
-                            // 可开张数
-                            let count = (margin * self.config.lever as f64 / min_unit) as u64;
-
-                            // 持仓量 USDT
-                            let open_quantity = price * count as f64;
-
-                            // 持仓量小于一张
-                            anyhow::ensure!(
-                                open_quantity < min_unit,
-                                "open quantity < min unit: {} USDT < {} USDT",
-                                margin,
-                                min_unit
-                            );
-
-                            let temp = margin + self.config.fee;
-
-                            // 保证金不足
-                            anyhow::ensure!(
-                                balance < temp,
-                                "balance < margin + fee: {} USDT < {} USDT",
-                                balance,
-                                temp
-                            );
-
-                            if price != 0.0 {
-                                // 限价委托
-
-                                let (
-                                    stop_profit_condition,
-                                    stop_loss_condition,
-                                    stop_profit,
-                                    stop_loss,
-                                ) = if side == Side::BuyLong {
-                                    let stop_profit_condition =
-                                        price + stop_profit_condition.to_quantity(price);
-
-                                    anyhow::ensure!(
-                                        stop_profit_condition <= price,
-                                        "stop profit condition <= price: {} USDT <= {}",
-                                        stop_profit_condition,
-                                        price
-                                    );
-
-                                    let stop_loss_condition =
-                                        price - stop_loss_condition.to_quantity(price);
-
-                                    anyhow::ensure!(
-                                        stop_loss_condition >= price,
-                                        "stop profit condition >= price: {} USDT >= {}",
-                                        stop_loss_condition,
-                                        price
-                                    );
-
-                                    (
-                                        stop_profit_condition,
-                                        stop_loss_condition,
-                                        price + stop_profit.to_quantity(price),
-                                        price - stop_loss.to_quantity(price),
-                                    )
-                                } else {
-                                    let stop_profit_condition =
-                                        price - stop_profit_condition.to_quantity(price);
-
-                                    anyhow::ensure!(
-                                        stop_profit_condition >= price,
-                                        "stop profit condition >= price: {} USDT >= {}",
-                                        stop_profit_condition,
-                                        price
-                                    );
-
-                                    let stop_loss_condition =
-                                        price + stop_loss_condition.to_quantity(price);
-
-                                    anyhow::ensure!(
-                                        stop_loss_condition <= price,
-                                        "stop profit condition <= price: {} USDT <= {}",
-                                        stop_loss_condition,
-                                        price
-                                    );
-
-                                    (
-                                        stop_profit_condition,
-                                        stop_loss_condition,
-                                        price - stop_profit.to_quantity(price),
-                                        price + stop_loss.to_quantity(price),
-                                    )
-                                };
-
-                                order_book.push(Delegate {
-                                    product: product.to_string(),
-                                    isolated: self.config.isolated,
-                                    lever: self.config.lever,
-                                    side: side.neg(),
-                                    price,
-                                    quantity: open_quantity,
-                                    stop_profit_condition,
-                                    stop_loss_condition,
-                                    stop_profit,
-                                    stop_loss,
-                                });
-
-                                balance -= temp;
-
-                                return Ok(());
-                            }
-
-                            balance -= temp;
-
-                            let (index, new_side, new_open_price, new_open_quantity) =
-                                avg_open_price(product, side, price, open_quantity);
-
-                            // 强平价格 = (入场价格 × (1 + 初始保证金率 - 维持保证金率)) ± (追加保证金 / 仓位数量)。
-                            // 初始保证金率 = 1 / 杠杆
-                            // 维持保证金率 = 0.005
-                            // 追加保证金 = 账户余额 - 初始化保证金
-                            // 初始化保证金 = 入场价格 / 杠杆
-                            let liquidation_price = new_open_price
-                                / (1.0 + 1.0 / self.config.lever as f64 - self.config.maintenance)
-                                - new_side.factor();
-
-                            if index == usize::MAX {
-                                let mut temp = Position {
-                                    product: product.to_string(),
-                                    isolated: self.config.isolated,
-                                    lever: self.config.lever,
-                                    side,
-                                    margin,
-                                    open_price: new_open_price,
-                                    close_price: 0.0,
-                                    open_quantity,
-                                    liquidation_price,
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    fee: self.config.fee,
-                                    open_time: time,
-                                    close_time: 0,
-                                    list: Vec::new(),
-                                };
-
-                                temp.list.push(ChildPosition {
-                                    side,
-                                    margin,
-                                    price: new_open_price,
-                                    quantity: open_quantity,
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    time,
-                                });
-
-                                position.push(temp);
-                            } else {
-                                let position = &mut position[index];
-                                position.side = new_side;
-                                position.open_price = new_open_price;
-                                position.open_quantity = new_open_quantity;
-                                position.list.push(ChildPosition {
-                                    side,
-                                    margin,
-                                    price,
-                                    quantity: open_quantity,
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    time,
-                                })
-                            }
-                        }
-                        Side::SellLong => {
-                            let position = position
-                                .iter()
-                                .find(|v| v.product == product && v.side == Side::SellShort);
-
-                            anyhow::ensure!(
-                                position.is_some(),
-                                "cannot find the position: {}",
-                                product
-                            );
-
-                            let position = position.unwrap();
-
-                            let margin = margin.to_quantity(position.open_quantity);
-
-                            // 张换算到 USDT
-                            // let min_unit = min_unit * open_price;
-
-                            // // 可开张数
-                            // let count = (margin * self.config.lever as f64 / min_unit) as u64;
-
-                            // // 持仓量 USDT
-                            // let open_quantity = open_price * count as f64;
-
-                            // // 张换算到 USDT
-                            // let min_unit = min_unit * 1;
-
-                            // margin / min_unit;
-                        }
-                        Side::BuySell => {
-                            // TODO: 要考虑现货的平仓
-                            let margin = match margin {
-                                Quantity(v) => v,
-                                Proportion(v) => {
-                                    position
-                                        .iter()
-                                        .filter(|v| v.side == Side::BuyLong)
-                                        .map(|v| v.open_quantity)
-                                        .sum::<f64>()
-                                        * v
-                                }
-                            };
-                        }
-                    }
-                }
-
-                anyhow::Ok(())
-            };
-
-            for (name, strategy) in self.strategy {}
+            strategy(&mut cx);
         }
 
-        todo!()
+        Ok(Vec::new())
     }
 
-    /// 开始回测。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `level` 时间级别。
-    /// * `k` K 线数据。
-    /// * `return` 回测结果，如果 [`Config`] 的某些参数未设置，且策略依赖这些参数，将返回错误。
-    pub fn start_with_k<S>(&self, product: S, level: Level, k: Vec<K>)
-    where
-        S: AsRef<str>,
-    {
-    }
-
-    async fn get_k_range(
+    pub async fn get_k_range(
         &self,
         product: &str,
         level: Level,
         time: TimeRange,
     ) -> anyhow::Result<Vec<K>> {
+        // TODO: 请求太快会返回错误，返回的是请求太快错误的话，继续请求
+
         let mut result = Vec::new();
 
         if time.start == 0 && time.end == 0 {
@@ -454,17 +169,17 @@ where
             return Ok(result);
         }
 
-        let mut start = time.start;
+        let mut end = time.end;
 
         loop {
-            let v = self.get_k(product, level, start).await?;
+            let v = self.get_k(product, level, end).await?;
 
             if let Some(k) = v.last() {
-                if k.time <= time.end {
+                if k.time <= time.start {
                     break;
                 }
 
-                start = k.time;
+                end = k.time;
                 result.extend(v);
             } else {
                 break;
@@ -484,98 +199,332 @@ where
     }
 }
 
-// 检查委托
-fn check_delegate(value: Delegate) -> anyhow::Result<Delegate> {
-    if value.side == Side::BuyLong {
-        anyhow::ensure!(
-            value.stop_profit_condition <= value.price,
-            "stop profit condition <= price: {} USDT <= {}",
-            value.stop_profit_condition,
-            value.price
-        );
-
-        anyhow::ensure!(
-            value.stop_loss_condition >= value.price,
-            "stop profit condition >= price: {} USDT >= {}",
-            value.stop_loss_condition,
-            value.price
-        );
-    } else {
-        anyhow::ensure!(
-            value.stop_profit_condition >= value.price,
-            "stop profit condition >= price: {} USDT >= {}",
-            value.stop_profit_condition,
-            value.price
-        );
-
-        anyhow::ensure!(
-            value.stop_loss_condition <= value.price,
-            "stop profit condition <= price: {} USDT <= {}",
-            value.stop_loss_condition,
-            value.price
-        );
-    };
-
-    Ok(value)
-}
-
 /// 撮合引擎。
 pub struct MatchmakingEngine {
     balance: f64,
+    config: Config,
     delegate: Vec<Delegate>,
-    position: Vec<Position>,
+    position: Vec<(Position, Vec<SubDelegate>)>,
+    history: Vec<Position>,
 }
 
 impl MatchmakingEngine {
-    pub fn new(balance: f64) -> Self {
+    pub fn new(config: Config) -> Self {
         Self {
-            balance,
+            balance: config.initial_margin,
+            config,
             delegate: Vec::new(),
             position: Vec::new(),
+            history: Vec::new(),
         }
     }
 
-    pub fn add_delegate(&mut self, value: Delegate) {
+    /// 返回订单 id。
+    pub fn delegate(&mut self, value: Delegate) -> anyhow::Result<usize> {
+        // 检查止盈止损是否有利于仓位
+        if value.side == Side::BuyLong {
+            if value.stop_profit_condition <= value.price {
+                anyhow::bail!(
+                    "stop profit condition <= price: {} USDT <= {}",
+                    value.stop_profit_condition,
+                    value.price
+                );
+            }
+
+            if value.stop_loss_condition >= value.price {
+                anyhow::bail!(
+                    "stop profit condition >= price: {} USDT >= {}",
+                    value.stop_loss_condition,
+                    value.price
+                );
+            }
+        } else {
+            if value.stop_profit_condition >= value.price {
+                anyhow::bail!(
+                    "stop profit condition >= price: {} USDT >= {}",
+                    value.stop_profit_condition,
+                    value.price
+                );
+            }
+
+            if value.stop_loss_condition <= value.price {
+                anyhow::bail!(
+                    "stop profit condition <= price: {} USDT <= {}",
+                    value.stop_loss_condition,
+                    value.price
+                );
+            }
+        };
+
+        // 检查平仓量是否小于等于持仓量
+        if value.side == Side::BuySell && value.side == Side::SellLong {
+            if let Some(v) = self
+                .position
+                .iter()
+                .find(|v| v.0.product == value.product)
+                .map(|v| &v.0)
+            {
+                anyhow::ensure!(
+                    v.open_quantity <= value.quantity,
+                    "close quantity must be less than or equal open quantity"
+                );
+            } else {
+                anyhow::bail!("no position: {}", value.product);
+            }
+        }
+
         self.delegate.push(value);
+
+        Ok(self.delegate.len() - 1)
     }
 
-    /// 处理。
+    /// 更新仓位。
     ///
     /// * `pair` 交易产品和价格。
-    pub fn update<T>(&mut self, pair: T)
+    pub fn update<T>(&mut self, time: u64, pair: T) -> anyhow::Result<()>
     where
         T: AsRef<[(String, f64)]>,
     {
         let pair = pair.as_ref();
 
-        // 计算盈亏
-        for (product, price) in pair {
-            for i in self.position.iter_mut().filter(|v| &v.product == product) {
-                i.profit = (price - i.open_price) * i.open_quantity;
-                i.profit_ratio = i.profit / i.margin;
-            }
-        }
-
-        // 历史仓位
-        let history = Vec::<Position>::new();
-
-        for (product, price) in pair {
-            for i in self.position.iter_mut().rev() {
-                if i.side == Side::BuyLong && *price >= i.liquidation_price
-                    || *price <= i.liquidation_price
-                {
-                    if i.isolated {
-                        i.close_price = i.liquidation_price;
-                    } else {
-                        i.close_price = *price;
+        // 处理跟随仓位的委托
+        for (position, sub_delegate) in self.position.iter_mut() {
+            for price in pair.iter().filter(|v| v.0 == position.product).map(|v| v.1) {
+                for i in (0..sub_delegate.len()).rev() {
+                    let delegate = &mut sub_delegate[i];
+                    if delegate.side == Side::BuySell && price >= delegate.condition
+                        || price <= delegate.condition
+                    {
+                        if delegate.condition == delegate.price {
+                            // 限价触发，市价委托
+                            let margin = delegate.quantity / position.lever as f64;
+                            let profit = (position.open_price - delegate.price) * delegate.quantity;
+                            let profit_ratio = profit / margin;
+                            self.balance += profit;
+                            self.balance -= self.config.fee;
+                            position.margin -= margin;
+                            position.fee += self.config.fee;
+                            position.list.push(SubPosition {
+                                side: delegate.side,
+                                price: delegate.condition,
+                                quantity: delegate.quantity,
+                                margin,
+                                profit,
+                                profit_ratio,
+                                time,
+                            });
+                            sub_delegate.swap_remove(i);
+                        } else {
+                            // 限价触发，限价委托
+                            delegate.condition = delegate.price;
+                        }
                     }
                 }
             }
         }
 
-        // // 历史仓位
-        // let mut history = Vec::new();
+        // 处理盈亏
+        for (product, price) in pair {
+            for i in self.position.iter_mut().filter(|v| v.0.product == *product) {
+                i.0.profit = (price - i.0.open_price) * i.0.open_quantity;
+                i.0.profit_ratio = i.0.profit / i.0.margin;
+            }
+        }
+
+        // 处理强平
+        'a: for (product, price) in pair {
+            for i in (0..self.position.len()).rev() {
+                let v = &self.position[i];
+                if *product == v.0.product
+                    && (v.0.side == Side::BuyLong && *price >= v.0.liquidation_price
+                        || *price <= v.0.liquidation_price)
+                {
+                    if v.0.isolated {
+                        let mut v = self.position.swap_remove(i);
+                        v.0.close_price = *price;
+                        v.0.close_time = time;
+                        self.history.push(v.0);
+                    } else {
+                        for (product, price) in pair {
+                            for i in (0..self.position.len()).rev() {
+                                let v = &self.position[i];
+                                if *product == v.0.product {
+                                    let mut v = self.position.swap_remove(i);
+                                    v.0.close_price = *price;
+                                    v.0.close_time = time;
+                                    self.history.push(v.0);
+                                }
+                            }
+                        }
+                        break 'a;
+                    }
+                }
+            }
+        }
 
         // 处理委托
+        for i in (0..self.delegate.len()).rev() {
+            let delegate = &self.delegate[i];
+            for price in pair.iter().filter(|v| v.0 == delegate.product).map(|v| v.1) {
+                if delegate.side == Side::BuySell || delegate.side == Side::SellLong {
+                    // 平仓委托
+                    let sub_delegate = self
+                        .position
+                        .iter_mut()
+                        .find(|v| v.0.product == delegate.product)
+                        .map(|v| &mut v.1)
+                        .unwrap();
+
+                    sub_delegate.push(SubDelegate {
+                        side: delegate.side,
+                        quantity: delegate.quantity,
+                        condition: delegate.price,
+                        price,
+                    });
+
+                    return Ok(());
+                }
+
+                if delegate.stop_profit_condition == 0.0 && delegate.stop_profit == 0.0 {
+                    anyhow::bail!(
+                        "because stop profit condition is zero, so stop profit must be zero"
+                    );
+                }
+
+                if delegate.stop_loss_condition == 0.0 && delegate.stop_loss == 0.0 {
+                    anyhow::bail!("because stop loss condition is zero, so stop loss must be zero")
+                }
+
+                if delegate.isolated {
+                    let margin = delegate.quantity / delegate.lever as f64;
+
+                    // 查找现有仓位
+                    let position = self.position.iter_mut().find(|v| {
+                        v.0.product == delegate.product
+                            && if self.config.position_mode {
+                                v.0.side == delegate.side
+                            } else {
+                                true
+                            }
+                    });
+
+                    // 计算开仓均价
+                    let (new_side, new_price, new_quantity) = match position.as_ref() {
+                        Some(v) => {
+                            let quantity = v.0.open_quantity - delegate.quantity;
+
+                            let side = if quantity == 0.0 {
+                                delegate.side
+                            } else if quantity > 0.0 {
+                                Side::BuyLong
+                            } else {
+                                Side::SellShort
+                            };
+
+                            let a = v.0.open_price * v.0.open_quantity * side.factor();
+                            let b = delegate.price * delegate.quantity * delegate.side.factor();
+                            let open_price = (a + b) / 2.0;
+
+                            (side, open_price, quantity.abs())
+                        }
+                        None => (delegate.side, delegate.price, delegate.quantity),
+                    };
+
+                    // 强平价格 = (入场价格 × (1 + 初始保证金率 - 维持保证金率)) ± (追加保证金 / 仓位数量)
+                    // 初始保证金率 = 1 / 杠杆
+                    // 维持保证金率 = 0.005
+                    // 追加保证金 = 账户余额 - 初始化保证金
+                    // 初始保证金 = 入场价格 / 杠杆
+                    let liquidation_price = new_price
+                        / (1.0 + 1.0 / self.config.lever as f64 - self.config.maintenance)
+                        - new_side.factor();
+
+                    if price <= delegate.price {
+                        // 子仓位
+                        let cp = SubPosition {
+                            side: delegate.side,
+                            price: delegate.price,
+                            quantity: delegate.quantity,
+                            margin,
+                            profit: 0.0,
+                            profit_ratio: 0.0,
+                            time: 0,
+                        };
+
+                        // 止盈委托
+                        let sp = SubDelegate {
+                            side: delegate.side.neg(),
+                            quantity: delegate.quantity,
+                            condition: delegate.stop_profit_condition,
+                            price: delegate.stop_profit,
+                        };
+
+                        // 止损委托
+                        let sl = SubDelegate {
+                            side: delegate.side.neg(),
+                            quantity: delegate.quantity,
+                            condition: delegate.stop_loss_condition,
+                            price: delegate.stop_loss,
+                        };
+
+                        match position {
+                            Some((position, sub_delegate)) => {
+                                // 已经存在仓位
+                                position.side = new_side;
+                                position.open_price = new_price;
+                                position.open_quantity = new_quantity;
+                                position.liquidation_price = liquidation_price;
+                                position.fee += self.config.fee;
+                                position.list.push(cp);
+                                sub_delegate.push(sp);
+                                sub_delegate.push(sl);
+                            }
+                            None => {
+                                // 新建仓位
+                                let mut position = Position {
+                                    product: delegate.product.clone(),
+                                    isolated: delegate.isolated,
+                                    lever: self.config.lever,
+                                    side: new_side,
+                                    open_price: new_price,
+                                    open_quantity: new_quantity,
+                                    margin,
+                                    liquidation_price,
+                                    close_price: 0.0,
+                                    profit: 0.0,
+                                    profit_ratio: 0.0,
+                                    fee: self.config.fee,
+                                    open_time: time,
+                                    close_time: 0,
+                                    list: Vec::new(),
+                                };
+
+                                position.list.push(cp);
+                                let mut sub_delegate = Vec::new();
+                                sub_delegate.push(sp);
+                                sub_delegate.push(sl);
+                                self.position.push((position, sub_delegate));
+                            }
+                        };
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
+}
+
+struct SubDelegate {
+    /// 方向。
+    side: Side,
+
+    /// 持仓量。
+    quantity: f64,
+
+    /// 条件。
+    condition: f64,
+
+    /// 价格。
+    price: f64,
 }

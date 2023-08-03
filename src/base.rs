@@ -1,3 +1,5 @@
+use crate::*;
+
 /// K 线。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct K {
@@ -15,6 +17,20 @@ pub struct K {
 
     /// 收盘价。
     pub close: f64,
+}
+
+impl std::fmt::Display for K {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{{\"time\": {}, \"open\": {}, \"high\": {}, \"low\": {}, \"close\": {}}}",
+            time_to_string(self.time),
+            self.open,
+            self.high,
+            self.low,
+            self.close
+        )
+    }
 }
 
 /// 时间级别。
@@ -350,11 +366,11 @@ pub enum Side {
     /// 卖出开空。
     SellShort,
 
-    /// 卖出平空。
-    SellLong,
-
     /// 卖出平多。
     BuySell,
+
+    /// 卖出平空。
+    SellLong,
 }
 
 impl Side {
@@ -363,18 +379,18 @@ impl Side {
         match self {
             Side::BuyLong => 1.0,
             Side::SellShort => -1.0,
-            Side::SellLong => panic!("sell long cannot get factor"),
             Side::BuySell => panic!("buy sell cannot get factor"),
+            Side::SellLong => panic!("sell long cannot get factor"),
         }
     }
 
-    /// 获取用以计算多空仓位的乘数。
+    /// 获取仓位的反方向。
     pub fn neg(&self) -> Side {
         match self {
             Side::BuyLong => Side::BuySell,
             Side::SellShort => Side::SellLong,
-            Side::SellLong => panic!("sell long cannot get neg"),
             Side::BuySell => panic!("buy sell cannot get neg"),
+            Side::SellLong => panic!("sell long cannot get neg"),
         }
     }
 }
@@ -400,33 +416,36 @@ pub struct Delegate {
     /// 委托数量
     pub quantity: f64,
 
+    /// 保证金
+    pub margin: f64,
+
     /// 止盈触发价。
     pub stop_profit_condition: f64,
 
     /// 止损触发价。
     pub stop_loss_condition: f64,
 
-    /// 止盈委托价，0 表示市价。
+    /// 止盈委托价。
     pub stop_profit: f64,
 
-    /// 止损委托价，0 表示市价。
+    /// 止损委托价。
     pub stop_loss: f64,
 }
 
 /// 清单仓位。
 #[derive(Debug, Clone)]
-pub struct ChildPosition {
+pub struct SubPosition {
     /// 持仓方向。
     pub side: Side,
-
-    /// 保证金
-    pub margin: f64,
 
     /// 均价。
     pub price: f64,
 
     /// 持仓量。
     pub quantity: f64,
+
+    /// 保证金
+    pub margin: f64,
 
     /// 收益。
     pub profit: f64,
@@ -453,20 +472,20 @@ pub struct Position {
     /// 持仓方向。
     pub side: Side,
 
-    /// 保证金
-    pub margin: f64,
-
     /// 开仓均价。
     pub open_price: f64,
-
-    /// 平仓均价。
-    pub close_price: f64,
 
     /// 持仓量。
     pub open_quantity: f64,
 
-    // 强平价格。
+    /// 保证金
+    pub margin: f64,
+
+    /// 强平价格。
     pub liquidation_price: f64,
+
+    /// 平仓均价。
+    pub close_price: f64,
 
     /// 收益。
     pub profit: f64,
@@ -483,8 +502,8 @@ pub struct Position {
     /// 平仓时间。
     pub close_time: u64,
 
-    /// 清单
-    pub list: Vec<ChildPosition>,
+    /// 交易清单。
+    pub list: Vec<SubPosition>,
 }
 
 /// 上下文环境。
@@ -513,20 +532,26 @@ pub struct Context<'a> {
     pub(crate) variable: &'a mut std::collections::HashMap<&'static str, Value>,
 
     pub(crate) order:
-        &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<Option<usize>>,
+        &'a mut dyn FnMut(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<usize>,
 
     pub(crate) cancel: &'a dyn Fn(usize),
 
-    pub(crate) new_context: &'a dyn Fn(&str, Level, u64) -> &Context,
+    pub(crate) new_context: &'a dyn Fn(&str, Level) -> &Context,
 }
 
 impl<'a> Context<'a> {
     /// 下单。
+    /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
+    /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
+    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `return` 订单 id，如果是市价单，则返回 None。
-    pub fn order(&self, side: Side, price: f64) -> anyhow::Result<Option<usize>> {
+    /// * `return` 订单 id。
+    pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<usize> {
         (self.order)(
             side,
             price,
@@ -538,26 +563,33 @@ impl<'a> Context<'a> {
         )
     }
 
-    /// 下单，止盈止损的委托价格不能超过 [`Config`] 的约束，否则下单失败。
+    /// 下单。
+    /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
+    /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
+    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 止盈止损委托为只减仓，平仓数量为 `quantity`，如果 [`Config`] 进行了平仓操作，那么止盈止损委托也会被撤销。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `margin` 委托数量，单位 USDT，0 表示由 [`Config`] 设置，如果是平仓操作，0 表示全部平仓。
-    /// * `stop_profit_condition` 止盈触发价格
-    /// * `stop_loss_condition` 止损触发价格
+    /// * `quantity` 委托数量，0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例。
+    /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
+    /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
-    /// * `stop_loss` 止损价委托格，0 表示市价，其他表示限价。
-    /// * `return` 订单 id，如果是市价单，则返回 None。
+    /// * `stop_loss` 止损委托格，0 表示市价，其他表示限价。
+    /// * `return` 订单 id。
     pub fn order_condition<A, B, C, D, E>(
-        &self,
+        &mut self,
         side: Side,
         price: f64,
-        margin: A,
+        quantity: A,
         stop_profit_condition: B,
         stop_loss_condition: C,
         stop_profit: D,
         stop_loss: E,
-    ) -> anyhow::Result<Option<usize>>
+    ) -> anyhow::Result<usize>
     where
         A: Into<Unit>,
         B: Into<Unit>,
@@ -568,7 +600,7 @@ impl<'a> Context<'a> {
         (self.order)(
             side,
             price,
-            margin.into(),
+            quantity.into(),
             stop_profit_condition.into(),
             stop_loss_condition.into(),
             stop_profit.into(),
@@ -576,21 +608,22 @@ impl<'a> Context<'a> {
         )
     }
 
-    /// 撤销未完成的订单。
+    /// 撤销订单。
+    /// 对于已完成的订单，将撤销止盈止损委托。
     ///
     /// * `id` 订单 id。
     pub fn cancel(&self, id: usize) {
         (self.cancel)(id)
     }
 
-    /// 创建新的上下文环境，继承当前的上下文变量表，如果要下单其他交易产品，则要将 [`Backtester`] 中的 [`other_product`] 设置为 true，否则下单失败。
+    /// 创建新的上下文环境，继承当前的上下文变量表。
+    /// 如果要下单其他交易产品，则要将 [`crate::backtester::Backtester`] 中的 `other_product` 设置为 true，否则下单失败。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
-    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
     /// * `return` 上下文环境。
-    pub fn new_context(&'a self, product: &'a str, level: Level, time: u64) -> &Context {
-        (self.new_context)(product, level, time)
+    pub fn new_context(&'a self, product: &'a str, level: Level) -> &Context {
+        (self.new_context)(product, level)
     }
 }
 
@@ -621,69 +654,69 @@ impl Unit {
     /// 转换到数量。
     pub fn to_quantity(self, value: f64) -> f64 {
         match self {
-            Quantity(v) => v,
-            Proportion(v) => v * value,
+            Self::Quantity(v) => v,
+            Self::Proportion(v) => v * value,
         }
     }
 }
 
 impl From<i8> for Unit {
     fn from(value: i8) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<u8> for Unit {
     fn from(value: u8) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<i16> for Unit {
     fn from(value: i16) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<u16> for Unit {
     fn from(value: u16) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<i32> for Unit {
     fn from(value: i32) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<u32> for Unit {
     fn from(value: u32) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<i64> for Unit {
     fn from(value: i64) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<u64> for Unit {
     fn from(value: u64) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<f32> for Unit {
     fn from(value: f32) -> Self {
-        Quantity(value as f64)
+        Self::Quantity(value as f64)
     }
 }
 
 impl From<f64> for Unit {
     fn from(value: f64) -> Self {
-        Quantity(value)
+        Self::Quantity(value)
     }
 }
 
@@ -696,11 +729,9 @@ impl std::cmp::PartialEq<f64> for Unit {
     }
 }
 
-pub use Unit::Proportion;
-pub use Unit::Quantity;
-
 /// 交易配置，参数可以不设置，这取决于你的策略。
-/// 例如，你的策略需要下单，但没有设置 `initial_margin` 和 `margin` 属性，则下单失败。
+/// 如果策略需要下单，但没有设置 `initial_margin` 和 `margin` 属性，则下单失败。
+#[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub initial_margin: f64,
     pub isolated: bool,
@@ -809,39 +840,4 @@ impl Config {
         self.stop_loss = value.into();
         self
     }
-}
-
-/// 交易所。
-#[async_trait::async_trait]
-pub trait Bourse {
-    /// 获取 K 线最新价格。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `level` 时间级别。
-    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
-    /// * `return` K 线数组。
-    async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
-    where
-        S: AsRef<str>,
-        S: std::marker::Send;
-
-    /// 获取 K 线标记价格。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `level` 时间级别。
-    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
-    /// * `return` K 线数组。
-    async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
-    where
-        S: AsRef<str>,
-        S: std::marker::Send;
-
-    /// 获取单笔最小交易数量。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `return` 1张 = 价格 * 返回值
-    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
-    where
-        S: AsRef<str>,
-        S: std::marker::Send;
 }

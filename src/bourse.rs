@@ -1,5 +1,141 @@
 use crate::*;
 
+/// 交易所。
+#[async_trait::async_trait]
+pub trait Bourse {
+    /// 获取 K 线最新价格。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `level` 时间级别。
+    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
+    /// * `return` K 线数组。
+    async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send;
+
+    /// 获取 K 线标记价格。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `level` 时间级别。
+    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
+    /// * `return` K 线数组。
+    async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send;
+
+    /// 获取单笔最小交易数量。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `return` 1张 = 价格 * 返回值
+    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send;
+}
+
+/// 本地交易所
+#[derive(Debug, Clone)]
+pub struct LocalBourse {
+    inner: std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>,
+}
+
+impl LocalBourse {
+    pub fn new() -> Self {
+        Self {
+            inner: std::collections::HashMap::new(),
+        }
+    }
+
+    /// 插入数据。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `k` K 线数据。
+    /// * `min_unit` 单笔最小交易数量。
+    /// * `return` 旧值
+    pub fn insert<S>(
+        &mut self,
+        product: S,
+        level: Level,
+        k: Vec<K>,
+        min_unit: f64,
+    ) -> Option<Vec<K>>
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref().to_string();
+        if let Some(v) = self.inner.get_mut(&product) {
+            v.1 = min_unit;
+            v.0.insert(level, k)
+        } else {
+            todo!()
+        }
+    }
+}
+
+impl std::ops::Deref for LocalBourse {
+    type Target =
+        std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl std::ops::DerefMut for LocalBourse {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
+
+#[async_trait::async_trait]
+impl Bourse for LocalBourse {
+    async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        let product = product.as_ref().to_string();
+        self.inner
+            .get(&product)
+            .ok_or(anyhow::anyhow!("product does not exist: {}", product))
+            .and_then(|v| {
+                v.0.get(&level)
+                    .ok_or(anyhow::anyhow!(
+                        "product does not exist: {}: {}",
+                        product,
+                        level
+                    ))
+                    .map(|v| v.iter().filter(|v| v.time <= time).cloned().collect())
+            })
+    }
+
+    async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        self.get_k(product, level, time).await
+    }
+
+    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        let product = product.as_ref();
+        self.inner
+            .get(product)
+            .ok_or(anyhow::anyhow!(
+                "product min unit does not exist: {}",
+                product
+            ))
+            .map(|v| v.1)
+    }
+}
+
+/// 欧易
 #[derive(Debug, Clone)]
 pub struct Okx {
     client: reqwest::Client,
@@ -70,14 +206,26 @@ impl Bourse for Okx {
             })
         };
 
-        let result = self
+        let mut result = self
             .client
-            .get(url)
+            .get(&url)
             .query(&args)
             .send()
             .await?
             .json::<serde_json::Value>()
             .await?;
+
+        // 频繁获取数据时返回的错误代码
+        while result["code"] == "50011" {
+            result = self
+                .client
+                .get(&url)
+                .query(&args)
+                .send()
+                .await?
+                .json::<serde_json::Value>()
+                .await?;
+        }
 
         anyhow::ensure!(result["code"] == "0", result.to_string());
 
@@ -237,12 +385,53 @@ impl Bourse for Okx {
     }
 }
 
+/// 币安
+#[derive(Debug, Clone)]
+pub struct Binance {}
+
+#[async_trait::async_trait]
+impl crate::Bourse for Binance {
+    async fn get_k<S>(
+        &self,
+        product: S,
+        level: crate::Level,
+        time: u64,
+    ) -> anyhow::Result<Vec<crate::K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        todo!()
+    }
+
+    async fn get_k_mark<S>(
+        &self,
+        product: S,
+        level: crate::Level,
+        time: u64,
+    ) -> anyhow::Result<Vec<crate::K>>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        todo!()
+    }
+
+    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: std::marker::Send,
+    {
+        todo!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::*;
 
     #[tokio::test]
-    async fn get_k() {
+    async fn okx_get_k() {
         let okx = Okx::new().unwrap().base_url("https://www.rkdfs.com");
         let k1 = okx.get_k("BTC-USDT", Level::Day1, 0).await.unwrap();
         let k2 = okx
@@ -257,7 +446,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_k_mark() {
+    async fn okx_get_k_mark() {
         let okx = Okx::new().unwrap().base_url("https://www.rkdfs.com");
         let k1 = okx.get_k_mark("BTC-USDT", Level::Day1, 0).await.unwrap();
         let k2 = okx
@@ -272,7 +461,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_min_unit() {
+    async fn okx_get_min_unit() {
         let okx = Okx::new().unwrap().base_url("https://www.rkdfs.com");
         let x = okx.get_min_unit("BTC-USDT-SWAP").await.unwrap();
         assert!(x == 0.01);

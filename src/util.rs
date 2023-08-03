@@ -20,3 +20,12 @@
 //     }
 //     sum / length as f64
 // }
+
+pub fn time_to_string(time: u64) -> String {
+    let datetime: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_utc(
+        chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap(),
+        chrono::Utc,
+    );
+    let local_datetime: chrono::DateTime<chrono::Local> = datetime.into();
+    local_datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
