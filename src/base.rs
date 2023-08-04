@@ -395,7 +395,7 @@ impl Side {
     }
 }
 
-/// 委托
+/// 委托。
 #[derive(Debug, Clone)]
 pub struct Delegate {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
@@ -410,13 +410,13 @@ pub struct Delegate {
     /// 持仓方向。
     pub side: Side,
 
-    /// 委托价格
+    /// 委托价格。
     pub price: f64,
 
-    /// 委托数量
+    /// 委托数量。
     pub quantity: f64,
 
-    /// 保证金
+    /// 保证金。
     pub margin: f64,
 
     /// 止盈触发价。
@@ -444,7 +444,7 @@ pub struct SubPosition {
     /// 持仓量。
     pub quantity: f64,
 
-    /// 保证金
+    /// 保证金。
     pub margin: f64,
 
     /// 收益。
@@ -478,7 +478,7 @@ pub struct Position {
     /// 持仓量。
     pub open_quantity: f64,
 
-    /// 保证金
+    /// 保证金。
     pub margin: f64,
 
     /// 强平价格。
@@ -493,7 +493,7 @@ pub struct Position {
     /// 收益率。
     pub profit_ratio: f64,
 
-    /// 手续费
+    /// 手续费。
     pub fee: f64,
 
     /// 开仓时间。
@@ -799,7 +799,7 @@ impl Config {
         self
     }
 
-    /// 维持保证金率
+    /// 维持保证金率。
     pub fn maintenance(mut self, value: f64) -> Self {
         self.maintenance = value;
         self

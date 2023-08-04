@@ -1,3 +1,5 @@
+use chrono::Datelike;
+
 use crate::*;
 
 /// 交易所。
@@ -7,7 +9,7 @@ pub trait Bourse {
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
-    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
+    /// * `time` 获取这个时间之前的数据，单位毫秒，0 表示获取最近的数据。
     /// * `return` K 线数组。
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
@@ -18,7 +20,7 @@ pub trait Bourse {
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
-    /// * `time` 获取这个时间之前的数据，0 表示获取最近的数据。
+    /// * `time` 获取这个时间之前的数据，单位毫秒，0 表示获取最近的数据。
     /// * `return` K 线数组。
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
@@ -28,14 +30,14 @@ pub trait Bourse {
     /// 获取单笔最小交易数量。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `return` 1张 = 价格 * 返回值
+    /// * `return` 面值，1张 = 价格 * 面值。
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: std::marker::Send;
 }
 
-/// 本地交易所
+/// 本地交易所。
 #[derive(Debug, Clone)]
 pub struct LocalBourse {
     inner: std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>,
@@ -53,24 +55,16 @@ impl LocalBourse {
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `k` K 线数据。
     /// * `min_unit` 单笔最小交易数量。
-    /// * `return` 旧值
+    /// * `return` 旧值。
     pub fn insert<S>(
         &mut self,
         product: S,
-        level: Level,
-        k: Vec<K>,
-        min_unit: f64,
-    ) -> Option<Vec<K>>
+        value: (std::collections::HashMap<Level, Vec<K>>, f64),
+    ) -> Option<(std::collections::HashMap<Level, Vec<K>>, f64)>
     where
         S: AsRef<str>,
     {
-        let product = product.as_ref().to_string();
-        if let Some(v) = self.inner.get_mut(&product) {
-            v.1 = min_unit;
-            v.0.insert(level, k)
-        } else {
-            todo!()
-        }
+        self.inner.insert(product.as_ref().to_string(), value)
     }
 }
 
@@ -135,7 +129,7 @@ impl Bourse for LocalBourse {
     }
 }
 
-/// 欧易
+/// 欧易。
 #[derive(Debug, Clone)]
 pub struct Okx {
     client: reqwest::Client,
@@ -177,32 +171,59 @@ impl Bourse for Okx {
     {
         let product = product.as_ref();
 
-        let level = match level {
-            Level::Minute1 => "1m",
-            Level::Minute5 => "m5",
-            Level::Minute15 => "m15",
-            Level::Minute30 => "m30",
-            Level::Hour1 => "1H",
-            Level::Hour4 => "4H",
-            Level::Day1 => "1Dutc",
-            Level::Week1 => "1Wutc",
-            Level::Month1 => "1Mutc",
+        let (level, unit) = match level {
+            Level::Minute1 => ("1m", 60 * 1000),
+            Level::Minute5 => ("5m", 5 * 60 * 1000),
+            Level::Minute15 => ("15m", 15 * 60 * 1000),
+            Level::Minute30 => ("30m", 30 * 60 * 1000),
+            Level::Hour1 => ("1H", 60 * 60 * 1000),
+            Level::Hour4 => ("4H", 4 * 60 * 60 * 1000),
+            Level::Day1 => ("1Dutc", 24 * 60 * 60 * 1000),
+            Level::Week1 => ("1Wutc", 7 * 24 * 60 * 60 * 1000),
+            Level::Month1 => {
+                // 获取当前时间戳与月初时间戳的差值
+                let now = chrono::Utc::now();
+                let year = now.year();
+                let month = now.month();
+                let first_day_of_month =
+                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
+                        .unwrap();
+                let timestamp = first_day_of_month.timestamp_millis() as u64;
+                (
+                    "1Mutc",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64
+                        - timestamp,
+                )
+            }
         };
 
         let mut url = self.base_url.clone();
 
-        let args = if time != 0 {
-            url += "/api/v5/market/history-index-candles";
+        let args = if time == 0 || {
+            if let Some(v) = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .checked_sub(std::time::Duration::from_millis(time))
+            {
+                v <= std::time::Duration::from_millis(unit)
+            } else {
+                false
+            }
+        } {
+            url += "/api/v5/market/candles";
+            serde_json::json!({
+                "instId": product,
+                "bar": level,
+            })
+        } else {
+            url += "/api/v5/market/history-candles";
             serde_json::json!({
                 "instId": product,
                 "bar": level,
                 "after": time,
-            })
-        } else {
-            url += "/api/v5/market/index-candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
             })
         };
 
@@ -270,43 +291,82 @@ impl Bourse for Okx {
     {
         let product = product.as_ref();
 
-        let level = match level {
-            Level::Minute1 => "1m",
-            Level::Minute5 => "m5",
-            Level::Minute15 => "m15",
-            Level::Minute30 => "m30",
-            Level::Hour1 => "1H",
-            Level::Hour4 => "4H",
-            Level::Day1 => "1Dutc",
-            Level::Week1 => "1Wutc",
-            Level::Month1 => "1Mutc",
+        let (level, unit) = match level {
+            Level::Minute1 => ("1m", 60 * 1000),
+            Level::Minute5 => ("5m", 5 * 60 * 1000),
+            Level::Minute15 => ("15m", 15 * 60 * 1000),
+            Level::Minute30 => ("30m", 30 * 60 * 1000),
+            Level::Hour1 => ("1H", 60 * 60 * 1000),
+            Level::Hour4 => ("4H", 4 * 60 * 60 * 1000),
+            Level::Day1 => ("1Dutc", 24 * 60 * 60 * 1000),
+            Level::Week1 => ("1Wutc", 7 * 24 * 60 * 60 * 1000),
+            Level::Month1 => {
+                // 获取当前时间戳与月初时间戳的差值
+                let now = chrono::Utc::now();
+                let year = now.year();
+                let month = now.month();
+                let first_day_of_month =
+                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
+                        .unwrap();
+                let timestamp = first_day_of_month.timestamp_millis() as u64;
+                (
+                    "1Mutc",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64
+                        - timestamp,
+                )
+            }
         };
 
         let mut url = self.base_url.clone();
 
-        let args = if time != 0 {
-            url += "/api/v5/market/history-index-candles";
+        let args = if time == 0 || {
+            if let Some(v) = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .checked_sub(std::time::Duration::from_millis(time))
+            {
+                v <= std::time::Duration::from_millis(unit)
+            } else {
+                false
+            }
+        } {
+            url += "/api/v5/market/mark-price-candles";
+            serde_json::json!({
+                "instId": product,
+                "bar": level,
+            })
+        } else {
+            url += "/api/v5/market/history-mark-price-candles";
             serde_json::json!({
                 "instId": product,
                 "bar": level,
                 "after": time,
             })
-        } else {
-            url += "/api/v5/market/index-candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
-            })
         };
 
-        let result = self
+        let mut result = self
             .client
-            .get(url)
+            .get(&url)
             .query(&args)
             .send()
             .await?
             .json::<serde_json::Value>()
             .await?;
+
+        // 频繁获取数据时返回的错误代码
+        while result["code"] == "50011" {
+            result = self
+                .client
+                .get(&url)
+                .query(&args)
+                .send()
+                .await?
+                .json::<serde_json::Value>()
+                .await?;
+        }
 
         anyhow::ensure!(result["code"] == "0", result.to_string());
 
@@ -385,7 +445,7 @@ impl Bourse for Okx {
     }
 }
 
-/// 币安
+/// 币安。
 #[derive(Debug, Clone)]
 pub struct Binance {}
 
@@ -469,3 +529,5 @@ mod tests {
         assert!(x == 0.00001);
     }
 }
+
+struct Hook {}

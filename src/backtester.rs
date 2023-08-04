@@ -43,7 +43,7 @@ where
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `strategy_level` 策略的时间级别。
     /// * `backtester_level` 回测器的精度。
-    /// * `time` 获取这个时间范围之内的数据，0 表示获取所有数据。
+    /// * `time` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
     /// * `return` 回测结果，如果 [`Config`] 的某些参数未设置，且策略依赖这些参数，将返回错误。
     pub async fn start<F, S, I>(
         &self,
@@ -54,7 +54,7 @@ where
         time: I,
     ) -> anyhow::Result<Vec<Position>>
     where
-        F: Fn(&Context),
+        F: Fn(&mut Context),
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
@@ -92,8 +92,8 @@ where
             let close = Source::new(&close[index..]);
 
             let mut order = |side,
-                             mut price: f64,
-                             quantity: Unit,
+                             mut price,
+                             mut quantity: Unit,
                              stop_profit_condition: Unit,
                              stop_loss_condition: Unit,
                              stop_profit: Unit,
@@ -102,8 +102,17 @@ where
                     price = close[0];
                 }
 
-                let quantity =
-                    quantity.to_quantity(self.config.initial_margin) * self.config.lever as f64;
+                let quantity = if quantity == 0.0 {
+                    self.config.margin.to_quantity(self.config.initial_margin)
+                        * self.config.lever as f64
+                } else {
+                    quantity.to_quantity(self.config.initial_margin) * self.config.lever as f64
+                };
+
+                // TODO: 要不要把这个检查放到撮合引擎？
+                if quantity < price * min_unit {
+                    anyhow::bail!("quantity < min unit: {} < {}", quantity, price * min_unit);
+                }
 
                 me.delegate(Delegate {
                     product: product.to_string(),
@@ -122,7 +131,7 @@ where
                 })
             };
 
-            let cx = Context {
+            let mut cx = Context {
                 product,
                 level: strategy_level,
                 time,
@@ -132,8 +141,8 @@ where
                 close,
                 variable: &mut variable,
                 order: &mut order,
-                cancel: todo!(),
-                new_context: todo!(),
+                cancel: &|a| {},
+                new_context: &|a, b| todo!(),
             };
 
             strategy(&mut cx);
@@ -148,8 +157,6 @@ where
         level: Level,
         time: TimeRange,
     ) -> anyhow::Result<Vec<K>> {
-        // TODO: 请求太快会返回错误，返回的是请求太快错误的话，继续请求
-
         let mut result = Vec::new();
 
         if time.start == 0 && time.end == 0 {
@@ -170,6 +177,13 @@ where
         }
 
         let mut end = time.end;
+
+        if end == u64::MAX - 1 {
+            end = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+        }
 
         loop {
             let v = self.get_k(product, level, end).await?;
@@ -220,36 +234,66 @@ impl MatchmakingEngine {
     }
 
     /// 返回订单 id。
-    pub fn delegate(&mut self, value: Delegate) -> anyhow::Result<usize> {
+    pub fn delegate(&mut self, mut value: Delegate) -> anyhow::Result<usize> {
+        // 检查止盈参数
+        if value.side == Side::BuyLong || value.side == Side::SellShort {
+            if value.stop_profit_condition == value.price && value.stop_profit != value.price {
+                anyhow::bail!(
+                    "because the stop profit condition is zero, the stop profit must also be zero"
+                );
+            }
+
+            if value.stop_loss_condition == value.price && value.stop_loss != value.price {
+                anyhow::bail!(
+                    "because the stop loss condition is zero, the stop loss must also be zero"
+                )
+            }
+        }
+
+        // 如果没有设置止盈止损，则使用 Config 的止盈止损
+        if value.stop_profit_condition == value.price && self.config.stop_profit != 0.0 {
+            let temp = value.price + self.config.stop_profit.to_quantity(value.price);
+            value.stop_profit_condition = temp;
+            value.stop_profit = temp;
+        }
+
+        if value.stop_profit_condition == value.price && self.config.stop_loss != 0.0 {
+            let temp = value.price + self.config.stop_loss.to_quantity(value.price);
+            value.stop_loss_condition = temp;
+            value.stop_loss = temp;
+        }
+
         // 检查止盈止损是否有利于仓位
         if value.side == Side::BuyLong {
-            if value.stop_profit_condition <= value.price {
+            if value.stop_profit_condition != value.price {
+                if value.stop_profit_condition < value.price {
+                    anyhow::bail!(
+                        "stop profit condition <= price: {} <= {}",
+                        value.stop_profit_condition,
+                        value.price
+                    );
+                }
+
+                if value.stop_loss_condition > value.price {
+                    anyhow::bail!(
+                        "stop profit condition >= price: {} >= {}",
+                        value.stop_loss_condition,
+                        value.price
+                    );
+                }
+            }
+        } else if value.stop_loss_condition != value.price {
+            if value.stop_profit_condition > value.price {
                 anyhow::bail!(
-                    "stop profit condition <= price: {} USDT <= {}",
+                    "stop profit condition >= price: {} >= {}",
                     value.stop_profit_condition,
                     value.price
                 );
             }
 
-            if value.stop_loss_condition >= value.price {
+            if value.stop_loss_condition < value.price {
                 anyhow::bail!(
-                    "stop profit condition >= price: {} USDT >= {}",
-                    value.stop_loss_condition,
-                    value.price
-                );
-            }
-        } else {
-            if value.stop_profit_condition >= value.price {
-                anyhow::bail!(
-                    "stop profit condition >= price: {} USDT >= {}",
-                    value.stop_profit_condition,
-                    value.price
-                );
-            }
-
-            if value.stop_loss_condition <= value.price {
-                anyhow::bail!(
-                    "stop profit condition <= price: {} USDT <= {}",
+                    "stop profit condition <= price: {} <= {}",
                     value.stop_loss_condition,
                     value.price
                 );
@@ -265,7 +309,7 @@ impl MatchmakingEngine {
                 .map(|v| &v.0)
             {
                 anyhow::ensure!(
-                    v.open_quantity <= value.quantity,
+                    value.quantity <= v.open_quantity,
                     "close quantity must be less than or equal open quantity"
                 );
             } else {
@@ -273,8 +317,19 @@ impl MatchmakingEngine {
             }
         }
 
-        self.delegate.push(value);
+        // 检查余额
+        if self.balance <= value.margin + self.config.fee {
+            anyhow::bail!(
+                "insufficient fund: balance < margin + fee: {} < {} + {}",
+                self.balance,
+                value.margin,
+                self.config.fee
+            );
+        }
 
+        self.balance -= value.margin + self.config.fee;
+
+        self.delegate.push(value);
         Ok(self.delegate.len() - 1)
     }
 
@@ -366,8 +421,8 @@ impl MatchmakingEngine {
         for i in (0..self.delegate.len()).rev() {
             let delegate = &self.delegate[i];
             for price in pair.iter().filter(|v| v.0 == delegate.product).map(|v| v.1) {
+                // 平仓委托
                 if delegate.side == Side::BuySell || delegate.side == Side::SellLong {
-                    // 平仓委托
                     let sub_delegate = self
                         .position
                         .iter_mut()
@@ -383,16 +438,6 @@ impl MatchmakingEngine {
                     });
 
                     return Ok(());
-                }
-
-                if delegate.stop_profit_condition == 0.0 && delegate.stop_profit == 0.0 {
-                    anyhow::bail!(
-                        "because stop profit condition is zero, so stop profit must be zero"
-                    );
-                }
-
-                if delegate.stop_loss_condition == 0.0 && delegate.stop_loss == 0.0 {
-                    anyhow::bail!("because stop loss condition is zero, so stop loss must be zero")
                 }
 
                 if delegate.isolated {
