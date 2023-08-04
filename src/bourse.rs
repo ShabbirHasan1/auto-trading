@@ -14,7 +14,7 @@ pub trait Bourse {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send;
+        S: Send;
 
     /// 获取 K 线标记价格。
     ///
@@ -25,7 +25,7 @@ pub trait Bourse {
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send;
+        S: Send;
 
     /// 获取单笔最小交易数量。
     ///
@@ -34,7 +34,7 @@ pub trait Bourse {
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: std::marker::Send;
+        S: Send;
 }
 
 /// 本地交易所。
@@ -88,7 +88,7 @@ impl Bourse for LocalBourse {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         let product = product.as_ref().to_string();
         self.inner
@@ -108,7 +108,7 @@ impl Bourse for LocalBourse {
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         self.get_k(product, level, time).await
     }
@@ -116,7 +116,7 @@ impl Bourse for LocalBourse {
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         let product = product.as_ref();
         self.inner
@@ -160,6 +160,145 @@ impl Okx {
         self.base_url = base_url.as_ref().to_string();
         self
     }
+
+    async fn request_k<S>(
+        &self,
+        product: S,
+        level: Level,
+        time: u64,
+        mark: bool,
+    ) -> anyhow::Result<Vec<K>>
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref();
+
+        let product = if !product.contains("-") {
+            product_mapping(product)
+        } else {
+            product.into()
+        };
+
+        let (level, unit) = match level {
+            Level::Minute1 => ("1m", 60 * 1000),
+            Level::Minute5 => ("5m", 5 * 60 * 1000),
+            Level::Minute15 => ("15m", 15 * 60 * 1000),
+            Level::Minute30 => ("30m", 30 * 60 * 1000),
+            Level::Hour1 => ("1H", 60 * 60 * 1000),
+            Level::Hour4 => ("4H", 4 * 60 * 60 * 1000),
+            Level::Day1 => ("1Dutc", 24 * 60 * 60 * 1000),
+            Level::Week1 => ("1Wutc", 7 * 24 * 60 * 60 * 1000),
+            Level::Month1 => {
+                // 获取当前时间戳与月初时间戳的差值
+                let now = chrono::Utc::now();
+                let year = now.year();
+                let month = now.month();
+                let first_day_of_month =
+                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
+                        .unwrap();
+                let timestamp = first_day_of_month.timestamp_millis() as u64;
+                (
+                    "1Mutc",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64
+                        - timestamp,
+                )
+            }
+        };
+
+        let mut url = self.base_url.clone();
+
+        let args = if time == 0 || {
+            if let Some(v) = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .checked_sub(std::time::Duration::from_millis(time))
+            {
+                v <= std::time::Duration::from_millis(unit)
+            } else {
+                false
+            }
+        } {
+            url += if mark {
+                "/api/v5/market/mark-price-candles"
+            } else {
+                "/api/v5/market/candles"
+            };
+            serde_json::json!({
+                "instId": product,
+                "bar": level,
+            })
+        } else {
+            url += if mark {
+                "/api/v5/market/history-mark-price-candles"
+            } else {
+                "/api/v5/market/history-candles"
+            };
+            serde_json::json!({
+                "instId": product,
+                "bar": level,
+                "after": time,
+            })
+        };
+
+        let mut result = self
+            .client
+            .get(&url)
+            .query(&args)
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+
+        // 频繁获取数据时返回的错误代码
+        while result["code"] == "50011" {
+            result = self
+                .client
+                .get(&url)
+                .query(&args)
+                .send()
+                .await?
+                .json::<serde_json::Value>()
+                .await?;
+        }
+
+        anyhow::ensure!(result["code"] == "0", result.to_string());
+
+        let array = result["data"]
+            .as_array()
+            .ok_or(anyhow::anyhow!("interface exception"))?;
+
+        let mut result = Vec::with_capacity(array.len());
+
+        for i in array {
+            result.push(K {
+                time: i[0]
+                    .as_str()
+                    .ok_or(anyhow::anyhow!("interface exception"))?
+                    .parse::<u64>()?,
+                open: i[1]
+                    .as_str()
+                    .ok_or(anyhow::anyhow!("interface exception"))?
+                    .parse::<f64>()?,
+                high: i[2]
+                    .as_str()
+                    .ok_or(anyhow::anyhow!("interface exception"))?
+                    .parse::<f64>()?,
+                low: i[3]
+                    .as_str()
+                    .ok_or(anyhow::anyhow!("interface exception"))?
+                    .parse::<f64>()?,
+                close: i[4]
+                    .as_str()
+                    .ok_or(anyhow::anyhow!("interface exception"))?
+                    .parse::<f64>()?,
+            });
+        }
+
+        Ok(result)
+    }
 }
 
 #[async_trait::async_trait]
@@ -167,249 +306,31 @@ impl Bourse for Okx {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
-        let product = product.as_ref();
-
-        let (level, unit) = match level {
-            Level::Minute1 => ("1m", 60 * 1000),
-            Level::Minute5 => ("5m", 5 * 60 * 1000),
-            Level::Minute15 => ("15m", 15 * 60 * 1000),
-            Level::Minute30 => ("30m", 30 * 60 * 1000),
-            Level::Hour1 => ("1H", 60 * 60 * 1000),
-            Level::Hour4 => ("4H", 4 * 60 * 60 * 1000),
-            Level::Day1 => ("1Dutc", 24 * 60 * 60 * 1000),
-            Level::Week1 => ("1Wutc", 7 * 24 * 60 * 60 * 1000),
-            Level::Month1 => {
-                // 获取当前时间戳与月初时间戳的差值
-                let now = chrono::Utc::now();
-                let year = now.year();
-                let month = now.month();
-                let first_day_of_month =
-                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
-                        .unwrap();
-                let timestamp = first_day_of_month.timestamp_millis() as u64;
-                (
-                    "1Mutc",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64
-                        - timestamp,
-                )
-            }
-        };
-
-        let mut url = self.base_url.clone();
-
-        let args = if time == 0 || {
-            if let Some(v) = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .checked_sub(std::time::Duration::from_millis(time))
-            {
-                v <= std::time::Duration::from_millis(unit)
-            } else {
-                false
-            }
-        } {
-            url += "/api/v5/market/candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
-            })
-        } else {
-            url += "/api/v5/market/history-candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
-                "after": time,
-            })
-        };
-
-        let mut result = self
-            .client
-            .get(&url)
-            .query(&args)
-            .send()
-            .await?
-            .json::<serde_json::Value>()
-            .await?;
-
-        // 频繁获取数据时返回的错误代码
-        while result["code"] == "50011" {
-            result = self
-                .client
-                .get(&url)
-                .query(&args)
-                .send()
-                .await?
-                .json::<serde_json::Value>()
-                .await?;
-        }
-
-        anyhow::ensure!(result["code"] == "0", result.to_string());
-
-        let array = result["data"]
-            .as_array()
-            .ok_or(anyhow::anyhow!("interface exception"))?;
-
-        let mut result = Vec::with_capacity(array.len());
-
-        for i in array {
-            result.push(K {
-                time: i[0]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<u64>()?,
-                open: i[1]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                high: i[2]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                low: i[3]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                close: i[4]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-            });
-        }
-
-        Ok(result)
+        self.request_k(product, level, time, false).await
     }
 
     async fn get_k_mark<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
-        let product = product.as_ref();
-
-        let (level, unit) = match level {
-            Level::Minute1 => ("1m", 60 * 1000),
-            Level::Minute5 => ("5m", 5 * 60 * 1000),
-            Level::Minute15 => ("15m", 15 * 60 * 1000),
-            Level::Minute30 => ("30m", 30 * 60 * 1000),
-            Level::Hour1 => ("1H", 60 * 60 * 1000),
-            Level::Hour4 => ("4H", 4 * 60 * 60 * 1000),
-            Level::Day1 => ("1Dutc", 24 * 60 * 60 * 1000),
-            Level::Week1 => ("1Wutc", 7 * 24 * 60 * 60 * 1000),
-            Level::Month1 => {
-                // 获取当前时间戳与月初时间戳的差值
-                let now = chrono::Utc::now();
-                let year = now.year();
-                let month = now.month();
-                let first_day_of_month =
-                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
-                        .unwrap();
-                let timestamp = first_day_of_month.timestamp_millis() as u64;
-                (
-                    "1Mutc",
-                    std::time::SystemTime::now()
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64
-                        - timestamp,
-                )
-            }
-        };
-
-        let mut url = self.base_url.clone();
-
-        let args = if time == 0 || {
-            if let Some(v) = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .checked_sub(std::time::Duration::from_millis(time))
-            {
-                v <= std::time::Duration::from_millis(unit)
-            } else {
-                false
-            }
-        } {
-            url += "/api/v5/market/mark-price-candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
-            })
-        } else {
-            url += "/api/v5/market/history-mark-price-candles";
-            serde_json::json!({
-                "instId": product,
-                "bar": level,
-                "after": time,
-            })
-        };
-
-        let mut result = self
-            .client
-            .get(&url)
-            .query(&args)
-            .send()
-            .await?
-            .json::<serde_json::Value>()
-            .await?;
-
-        // 频繁获取数据时返回的错误代码
-        while result["code"] == "50011" {
-            result = self
-                .client
-                .get(&url)
-                .query(&args)
-                .send()
-                .await?
-                .json::<serde_json::Value>()
-                .await?;
-        }
-
-        anyhow::ensure!(result["code"] == "0", result.to_string());
-
-        let array = result["data"]
-            .as_array()
-            .ok_or(anyhow::anyhow!("interface exception"))?;
-
-        let mut result = Vec::with_capacity(array.len());
-
-        for i in array {
-            result.push(K {
-                time: i[0]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<u64>()?,
-                open: i[1]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                high: i[2]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                low: i[3]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-                close: i[4]
-                    .as_str()
-                    .ok_or(anyhow::anyhow!("interface exception"))?
-                    .parse::<f64>()?,
-            });
-        }
-
-        Ok(result)
+        self.request_k(product, level, time, true).await
     }
 
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         let product = product.as_ref();
+
+        let product = if !product.contains("-") {
+            product_mapping(product)
+        } else {
+            product.into()
+        };
 
         let inst_type = if product.contains("SWAP") {
             "SWAP"
@@ -459,7 +380,7 @@ impl crate::Bourse for Binance {
     ) -> anyhow::Result<Vec<crate::K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         todo!()
     }
@@ -472,7 +393,7 @@ impl crate::Bourse for Binance {
     ) -> anyhow::Result<Vec<crate::K>>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         todo!()
     }
@@ -480,7 +401,7 @@ impl crate::Bourse for Binance {
     async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
-        S: std::marker::Send,
+        S: Send,
     {
         todo!()
     }

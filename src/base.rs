@@ -81,6 +81,8 @@ impl std::fmt::Display for Level {
 }
 
 /// 数据系列。
+/// 索引越界将返回 f64::NAN。
+/// 切片越界将返回 &[]。
 #[derive(Debug)]
 pub struct Source {
     inner: [f64],
