@@ -93,14 +93,17 @@ impl Bourse for LocalBourse {
         let product = product.as_ref().to_string();
         self.inner
             .get(&product)
-            .ok_or(anyhow::anyhow!("product does not exist: {}", product))
+            .map(|v| &v.0)
+            .or_else(|| {
+                let product = product_mapping(&product);
+                self.inner.get(product.as_ref()).map(|v| &v.0)
+            })
+            .ok_or_else(|| anyhow::anyhow!("product does not exist: {}", product))
             .and_then(|v| {
-                v.0.get(&level)
-                    .ok_or(anyhow::anyhow!(
-                        "product does not exist: {}: {}",
-                        product,
-                        level
-                    ))
+                v.get(&level)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("product does not exist: {}: {}", product, level)
+                    })
                     .map(|v| v.iter().filter(|v| v.time <= time).cloned().collect())
             })
     }
@@ -121,6 +124,10 @@ impl Bourse for LocalBourse {
         let product = product.as_ref();
         self.inner
             .get(product)
+            .or_else(|| {
+                let product = product_mapping(&product);
+                self.inner.get(product.as_ref())
+            })
             .ok_or(anyhow::anyhow!(
                 "product min unit does not exist: {}",
                 product
@@ -173,10 +180,10 @@ impl Okx {
     {
         let product = product.as_ref();
 
-        let product = if !product.contains("-") {
-            product_mapping(product)
-        } else {
+        let product = if product.contains("-") {
             product.into()
+        } else {
+            product_mapping(product)
         };
 
         let (level, unit) = match level {
@@ -326,10 +333,10 @@ impl Bourse for Okx {
     {
         let product = product.as_ref();
 
-        let product = if !product.contains("-") {
-            product_mapping(product)
-        } else {
+        let product = if product.contains("-") {
             product.into()
+        } else {
+            product_mapping(product)
         };
 
         let inst_type = if product.contains("SWAP") {
@@ -450,5 +457,3 @@ mod tests {
         assert!(x == 0.00001);
     }
 }
-
-struct Hook {}
