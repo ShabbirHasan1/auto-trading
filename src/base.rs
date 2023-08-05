@@ -39,6 +39,9 @@ pub enum Level {
     /// 1 分。
     Minute1,
 
+    /// 3 分。
+    Minute3,
+
     /// 5 分。
     Minute5,
 
@@ -51,11 +54,23 @@ pub enum Level {
     /// 1 小时。
     Hour1,
 
+    /// 2 小时。
+    Hour2,
+
     /// 4 小时。
     Hour4,
 
+    /// 6 小时。
+    Hour6,
+
+    /// 12 小时。
+    Hour12,
+
     /// 1 天。
     Day1,
+
+    /// 3 天。
+    Day3,
 
     /// 1 周。
     Week1,
@@ -68,12 +83,17 @@ impl std::fmt::Display for Level {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
             Level::Minute1 => f.write_str("1 minute"),
+            Level::Minute3 => f.write_str("3 minute"),
             Level::Minute5 => f.write_str("5 minute"),
             Level::Minute15 => f.write_str("15 minute"),
             Level::Minute30 => f.write_str("30 minute"),
             Level::Hour1 => f.write_str("1 hour"),
+            Level::Hour2 => f.write_str("2 hour"),
             Level::Hour4 => f.write_str("4 hour"),
+            Level::Hour6 => f.write_str("6 hour"),
+            Level::Hour12 => f.write_str("12 hour"),
             Level::Day1 => f.write_str("1 day"),
+            Level::Day3 => f.write_str("3 day"),
             Level::Week1 => f.write_str("1 meek"),
             Level::Month1 => f.write_str("1 month"),
         }

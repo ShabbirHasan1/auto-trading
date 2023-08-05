@@ -4,7 +4,6 @@ use crate::*;
 pub struct Backtester<T> {
     bourse: T,
     config: Config,
-    mark_price: bool,
     other_product: bool,
 }
 
@@ -20,15 +19,8 @@ where
         Self {
             bourse,
             config,
-            mark_price: false,
             other_product: false,
         }
-    }
-
-    /// 使用标记价格。
-    pub fn mark_price(mut self, value: bool) -> Self {
-        self.mark_price = value;
-        self
     }
 
     /// 允许策略下单 `start` 函数参数中 `product` 之外的交易产品。
@@ -141,7 +133,7 @@ where
                 close,
                 variable: &mut variable,
                 order: &mut order,
-                cancel: &|a| {},
+                cancel: &|a| todo!(),
                 new_context: &|a, b| todo!(),
             };
 
@@ -163,7 +155,7 @@ where
             let mut time = 0;
 
             loop {
-                let v = self.get_k(product, level, time).await?;
+                let v = self.bourse.get_k(product, level, time).await?;
 
                 if let Some(k) = v.last() {
                     time = k.time;
@@ -186,7 +178,7 @@ where
         }
 
         loop {
-            let v = self.get_k(product, level, end).await?;
+            let v = self.bourse.get_k(product, level, end).await?;
 
             if let Some(k) = v.last() {
                 if k.time <= time.start {
@@ -201,15 +193,6 @@ where
         }
 
         Ok(result)
-    }
-
-    async fn get_k(&self, product: &str, level: Level, time: u64) -> anyhow::Result<Vec<K>> {
-        if self.mark_price {
-            self.bourse.get_k_mark(product, level, time)
-        } else {
-            self.bourse.get_k(product, level, time)
-        }
-        .await
     }
 }
 
