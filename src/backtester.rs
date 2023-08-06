@@ -398,16 +398,24 @@ impl MatchmakingEngine {
                             // TODO: 注意计算平仓量
                             // TODO: 保证金计算可能不准确，考虑加入 margin
                             // 限价触发，市价委托
-                            let margin = delegate.quantity / position.lever as f64;
                             let profit = (price - position.open_price) * delegate.quantity
                                 / position.open_price;
+
+                            let save = position.margin;
+
+                            position.margin = (position.open_quantity - delegate.quantity)
+                                / position.lever as f64;
+
+                            let margin = save - position.margin;
+
                             let profit_ratio = profit / margin;
 
                             self.balance += profit;
-                            self.balance -= self.config.fee;
+
                             self.balance += margin;
 
-                            position.margin -= margin;
+                            self.balance -= self.config.fee;
+
                             position.fee += self.config.fee;
 
                             position.list.push(SubPosition {
@@ -787,6 +795,7 @@ impl MatchmakingEngine {
     }
 }
 
+// TODO: 要不要 pub
 #[derive(Debug, Clone)]
 struct SubDelegate {
     /// 方向。
