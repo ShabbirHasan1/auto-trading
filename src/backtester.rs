@@ -398,7 +398,6 @@ impl MatchmakingEngine {
                             // TODO: 注意计算平仓量
                             // TODO: 保证金计算可能不准确，考虑加入 margin
                             // 限价触发，市价委托
-
                             let margin = delegate.quantity / position.lever as f64;
                             let profit = (price - position.open_price) * delegate.quantity
                                 / position.open_price;
@@ -438,7 +437,12 @@ impl MatchmakingEngine {
                 i.0.profit = (price - i.0.open_price) * i.0.open_quantity / i.0.open_price;
                 i.0.profit_ratio = i.0.profit / i.0.margin;
                 // 应该卖出的时候才计算盈亏
-                for i in i.0.list.iter_mut() {
+                // 考虑加上 fee 给清单
+                for i in
+                    i.0.list
+                        .iter_mut()
+                        .filter(|v| v.side == Side::BuySell || v.side == Side::SellLong)
+                {
                     i.profit = (price - i.price) * i.quantity / i.price;
                     i.profit = i.profit / i.margin;
                 }
@@ -560,7 +564,7 @@ impl MatchmakingEngine {
                             margin,
                             profit: 0.0,
                             profit_ratio: 0.0,
-                            time: 0,
+                            time,
                         };
 
                         // 止盈委托
