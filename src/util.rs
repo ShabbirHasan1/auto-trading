@@ -1,16 +1,26 @@
 use crate::*;
 
+pub fn highest(source: &Source, length: usize) -> f64 {
+    *source
+        .iter()
+        .take(length)
+        .max_by(|a, b| a.total_cmp(b))
+        .unwrap_or(&f64::NAN)
+}
+
+pub fn lowest(source: &Source, length: usize) -> f64 {
+    *source
+        .iter()
+        .take(length)
+        .min_by(|a, b| a.total_cmp(b))
+        .unwrap_or(&f64::NAN)
+}
+
 pub fn sma(source: &Source, length: usize) -> f64 {
-    if source[0..length].len() == 0 {
-        return f64::NAN;
-    }
     source.iter().take(length).sum::<f64>() / length as f64
 }
 
 pub fn ema(source: &Source, length: usize) -> f64 {
-    if source[0..length].len() == 0 {
-        return f64::NAN;
-    }
     let alpha = 2.0 / (length as f64 + 1.0);
     let mut sum = 0.0;
     for i in 0..source.len() {

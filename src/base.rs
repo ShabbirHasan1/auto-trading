@@ -1,7 +1,7 @@
 use crate::*;
 
 /// K 线。
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct K {
     /// K 线的时间。
     pub time: u64,
@@ -127,6 +127,18 @@ impl Source {
                     .unwrap_or(&[]),
             )
         }
+    }
+}
+
+impl PartialEq<f64> for &Source {
+    fn eq(&self, other: &f64) -> bool {
+        self[0] == *other
+    }
+}
+
+impl PartialOrd<f64> for &Source {
+    fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
+        self[0].partial_cmp(other)
     }
 }
 
@@ -551,12 +563,9 @@ pub struct Context<'a> {
     /// 收盘价数据系列。
     pub close: &'a Source,
 
-    pub(crate) variable: &'a mut std::collections::HashMap<&'static str, Value>,
+    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<u64>,
 
-    pub(crate) order:
-        &'a mut dyn FnMut(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<usize>,
-
-    pub(crate) cancel: &'a dyn Fn(usize),
+    pub(crate) cancel: &'a dyn Fn(u64),
 
     pub(crate) new_context: &'a dyn Fn(&str, Level) -> &Context,
 }
@@ -573,7 +582,7 @@ impl<'a> Context<'a> {
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `return` 订单 id。
-    pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<usize> {
+    pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<u64> {
         (self.order)(
             side,
             price,
@@ -611,7 +620,7 @@ impl<'a> Context<'a> {
         stop_loss_condition: C,
         stop_profit: D,
         stop_loss: E,
-    ) -> anyhow::Result<usize>
+    ) -> anyhow::Result<u64>
     where
         A: Into<Unit>,
         B: Into<Unit>,
@@ -634,7 +643,7 @@ impl<'a> Context<'a> {
     /// 对于已完成的订单，将撤销止盈止损委托。
     ///
     /// * `id` 订单 id。
-    pub fn cancel(&self, id: usize) {
+    pub fn cancel(&self, id: u64) {
         (self.cancel)(id)
     }
 
@@ -646,22 +655,6 @@ impl<'a> Context<'a> {
     /// * `return` 上下文环境。
     pub fn new_context(&'a self, product: &'a str, level: Level) -> &Context {
         (self.new_context)(product, level)
-    }
-}
-
-impl<'a> std::ops::Index<&'static str> for Context<'a> {
-    type Output = Value;
-
-    fn index(&self, index: &'static str) -> &Self::Output {
-        debug_assert!(self.variable.contains_key(index), "变量不存在: {}", index);
-        self.variable.get(index).unwrap()
-    }
-}
-
-impl<'a> std::ops::IndexMut<&'static str> for Context<'a> {
-    fn index_mut(&mut self, index: &'static str) -> &mut Self::Output {
-        debug_assert!(self.variable.contains_key(index), "变量不存在: {}", index);
-        self.variable.get_mut(index).unwrap()
     }
 }
 
@@ -776,8 +769,8 @@ impl Config {
             position_mode: false,
             lever: 1,
             fee: 0.0,
-            deviation: 1.0,
-            maintenance: 1.0,
+            deviation: 0.0,
+            maintenance: 0.0,
             margin: 0.into(),
             max_margin: 0.into(),
             stop_profit: 0.into(),

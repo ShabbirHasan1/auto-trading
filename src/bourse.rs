@@ -43,17 +43,39 @@ impl LocalBourse {
     /// 插入数据。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `value` 时间级别，k 线数据，单笔最小交易数量。
-    /// * `return` 旧值。
-    pub fn insert<S>(
-        &mut self,
-        product: S,
-        value: (std::collections::HashMap<Level, Vec<K>>, f64),
-    ) -> Option<(std::collections::HashMap<Level, Vec<K>>, f64)>
+    /// * `level` 时间级别。
+    /// * `k` k 线数据。
+    pub fn level_k<S>(&mut self, product: S, level: Level, k: Vec<K>) -> &mut Self
     where
         S: AsRef<str>,
     {
-        self.inner.insert(product.as_ref().to_string(), value)
+        let entry = self
+            .inner
+            .entry(product.as_ref().to_string())
+            .or_insert((std::collections::HashMap::new(), 0.0));
+        let (level_map, _) = entry;
+        let k_list = level_map.entry(level).or_insert(Vec::new());
+        k_list.extend(k);
+        self
+    }
+
+    /// 插入数据。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `min_unit` 单笔最小交易数量。
+    pub fn min_unit<S>(&mut self, product: S, min_unit: f64) -> &mut Self
+    where
+        S: AsRef<str>,
+    {
+        if let Some(entry) = self.inner.get_mut(product.as_ref()) {
+            entry.1 = min_unit;
+        } else {
+            self.inner.insert(
+                product.as_ref().to_string(),
+                (std::collections::HashMap::new(), min_unit),
+            );
+        }
+        self
     }
 }
 
@@ -93,7 +115,12 @@ impl Bourse for LocalBourse {
                     .ok_or_else(|| {
                         anyhow::anyhow!("product does not exist: {}: {}", product, level)
                     })
-                    .map(|v| v.iter().filter(|v| v.time <= time).cloned().collect())
+                    .map(|v| {
+                        v.iter()
+                            .filter(|v| time == 0 || v.time <= time)
+                            .cloned()
+                            .collect()
+                    })
             })
     }
 
@@ -227,7 +254,7 @@ impl Bourse for Okx {
             })
         };
 
-        let mut result = self
+        let result = self
             .client
             .get(&url)
             .query(&args)
@@ -235,18 +262,6 @@ impl Bourse for Okx {
             .await?
             .json::<serde_json::Value>()
             .await?;
-
-        // 频繁获取数据时返回的错误代码
-        while result["code"] == "50011" {
-            result = self
-                .client
-                .get(&url)
-                .query(&args)
-                .send()
-                .await?
-                .json::<serde_json::Value>()
-                .await?;
-        }
 
         anyhow::ensure!(result["code"] == "0", result.to_string());
 
