@@ -55,6 +55,10 @@ where
         // TODO: 要不要支持移动止盈止损？
         // TODO: 触发限价委托，不占用保证金，但是官方没有这个接口？？？？？？
 
+        // TODO: 没设置止盈止损按照 Config 止盈止损没有写！！！！！！！！！！！！！！！！！！！！！
+        // TODO: 没设置止盈止损按照 Config 止盈止损没有写！！！！！！！！！！！！！！！！！！！！！
+        // TODO: 没设置止盈止损按照 Config 止盈止损没有写！！！！！！！！！！！！！！！！！！！！！
+
         let product = product.as_ref();
 
         let k = self
@@ -74,11 +78,10 @@ where
         // 单笔最小交易数量
         let min_unit = self.bourse.get_min_unit(product).await?;
 
-        // 变量表
-        let mut variable = std::collections::HashMap::<&'static str, Value>::new();
-
         // 撮合引擎
         let me = std::cell::RefCell::new(MatchmakingEngine::new(self.config));
+
+        me.borrow_mut().product(product, min_unit);
 
         for index in (0..time.len()).rev().into_iter() {
             let time = time[index];
@@ -87,79 +90,25 @@ where
             let low = Source::new(&low[index..]);
             let close = Source::new(&close[index..]);
 
-            let order = |side: Side,
-                         mut price: f64,
-                         quantity: Unit,
-                         stop_profit_condition: Unit,
-                         stop_loss_condition: Unit,
-                         stop_profit: Unit,
-                         stop_loss: Unit| {
-                if price == 0.0 {
-                    price = close[0];
-                }
+            me.borrow_mut().ready(product, time, close[0]);
 
-                let quantity = if quantity == 0.0 {
-                    self.config.margin.to_quantity(self.config.initial_margin)
-                        * self.config.lever as f64
-                } else {
-                    quantity.to_quantity(self.config.initial_margin) * self.config.lever as f64
-                };
-
-                let unit = price * min_unit;
-
-                if quantity < unit {
-                    anyhow::bail!("quantity < min unit: {} < {}", quantity, price * min_unit);
-                }
-
-                let quantity = (quantity / unit).floor() * unit;
-
-                let stop_profit_condition = if stop_profit_condition == 0.0 {
-                    if self.config.stop_profit == 0.0 {
-                        0.0
-                    } else {
-                        price + self.config.stop_profit.to_quantity(price) * side.factor()
-                    }
-                } else {
-                    price + stop_profit_condition.to_quantity(price) * side.factor()
-                };
-
-                let stop_loss_condition = if stop_profit_condition == 0.0 {
-                    if self.config.stop_loss == 0.0 {
-                        0.0
-                    } else {
-                        price + self.config.stop_loss.to_quantity(price) * side.factor()
-                    }
-                } else {
-                    stop_loss_condition.to_quantity(price) * side.factor()
-                };
-
-                let stop_profit = if stop_profit == 0.0 {
-                    0.0
-                } else {
-                    price + stop_profit.to_quantity(price) * side.factor()
-                };
-
-                let stop_loss = if stop_loss == 0.0 {
-                    0.0
-                } else {
-                    price + stop_loss.to_quantity(price) * side.factor()
-                };
-
-                let result = me.borrow_mut().delegate(Delegate {
-                    product: product.to_string(),
-                    isolated: self.config.isolated,
-                    lever: self.config.lever,
+            let order = |side,
+                         price,
+                         quantity,
+                         stop_profit_condition,
+                         stop_loss_condition,
+                         stop_profit,
+                         stop_loss| {
+                me.borrow_mut().order(
+                    product,
                     side,
                     price,
                     quantity,
-                    margin: quantity / self.config.lever as f64,
                     stop_profit_condition,
                     stop_loss_condition,
                     stop_profit,
                     stop_loss,
-                });
-
-                result
+                )
             };
 
             let cancel = |value: u64| me.borrow_mut().cancel(value);
@@ -179,9 +128,7 @@ where
 
             strategy(&mut cx);
 
-            me.borrow_mut()
-                .update(time, [(product, close[0], min_unit)])
-                .unwrap();
+            me.borrow_mut().update();
         }
 
         println!("==> 委托");
@@ -258,117 +205,297 @@ where
 pub struct MatchmakingEngine {
     balance: f64,
     config: Config,
+    product: std::collections::HashMap<String, (f64, u64, f64)>,
     delegate: std::collections::HashMap<u64, Delegate>,
     position: Vec<(Position, Vec<SubDelegate>)>,
     history: Vec<Position>,
 }
 
 impl MatchmakingEngine {
-    pub fn new(config: Config) -> Self {
+    pub fn new(value: Config) -> Self {
         Self {
-            balance: config.initial_margin,
-            config,
+            balance: value.initial_margin,
+            config: value,
+            product: std::collections::HashMap::new(),
             delegate: std::collections::HashMap::new(),
             position: Vec::new(),
             history: Vec::new(),
         }
     }
 
-    /// 委托。
-    pub fn delegate(&mut self, mut value: Delegate) -> anyhow::Result<u64> {
-        // 检查止盈参数
-        if value.side == Side::BuyLong || value.side == Side::SellShort {
-            if value.stop_profit_condition == 0.0 && value.stop_profit != 0.0 {
-                anyhow::bail!(
-                    "the stop profit must be zero, because the stop profit condition is zero"
-                );
-            }
+    /// 插入产品。
+    ///
+    /// * `product` 交易产品。
+    /// * `min_unit` 面值。
+    pub fn product<S>(&mut self, product: S, min_unit: f64)
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref();
+        self.product.insert(product.to_string(), (min_unit, 0, 0.0));
+    }
 
-            if value.stop_loss_condition == 0.0 && value.stop_loss != 0.0 {
-                anyhow::bail!("the stop loss must be zero, because the stop loss condition is zero")
-            }
-        }
+    /// 准备。
+    /// 在调用委托之前，需要准备。
+    /// 在准备之前，需要插入产品。
+    ///
+    /// * `time` 时间。
+    /// * `value` 交易产品，价格。
+    pub fn ready<S>(&mut self, product: S, time: u64, price: f64)
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref();
+        let temp = self
+            .product
+            .get_mut(product)
+            .expect(&format!("no product: {}", product));
+        temp.1 = time;
+        temp.2 = price;
+    }
 
-        // 检查止盈止损是否有利于仓位
-        if value.side == Side::BuyLong {
-            if value.stop_profit_condition != 0.0 {
-                if value.stop_profit_condition <= value.price {
-                    anyhow::bail!(
-                        "buy long, but stop profit <= price: {} <= {}",
-                        value.stop_profit_condition,
-                        value.price
-                    );
+    /// 下单。
+    ///
+    /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
+    /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
+    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 止盈止损委托为只减仓，平仓数量为 `quantity`，如果 [`Config`] 进行了平仓操作，那么止盈止损委托也会被撤销。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `side` 订单方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `quantity` 委托数量，开仓 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，平仓 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
+    /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
+    /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
+    /// * `stop_loss` 止损委托格，0 表示市价，其他表示限价。
+    /// * `return` 订单 id。
+    pub fn order<S>(
+        &mut self,
+        product: S,
+        side: Side,
+        price: f64,
+        quantity: Unit,
+        stop_profit_condition: Unit,
+        stop_loss_condition: Unit,
+        stop_profit: Unit,
+        stop_loss: Unit,
+    ) -> anyhow::Result<u64>
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref();
+
+        // 面值，时间，价格
+        let (min_unit, _, close_price) = self
+            .product
+            .get(product)
+            .ok_or(anyhow::anyhow!("no product: {}", product))?
+            .to_owned();
+
+        if side == Side::BuyLong || side == Side::SellShort {
+            let price = if price == 0.0 { close_price } else { price };
+
+            // 最小下单数量
+            let min_unit = min_unit * price;
+
+            // 转换百分比
+            let quantity = if quantity == 0.0 {
+                if self.config.margin == 0.0 {
+                    0.0
+                } else {
+                    self.config.margin.to_quantity(self.config.initial_margin)
+                        * min_unit
+                        * self.config.lever as f64
                 }
-            }
-
-            if value.stop_loss_condition != 0.0 {
-                if value.stop_loss_condition >= value.price {
-                    anyhow::bail!(
-                        "buy long, but stop loss >= price: {} >= {}",
-                        value.stop_loss_condition,
-                        value.price
-                    );
-                }
-            }
-        } else if value.side == Side::SellShort {
-            if value.stop_profit_condition != 0.0 {
-                if value.stop_profit_condition >= value.price {
-                    anyhow::bail!(
-                        "sell short, but stop profit >= price: {} >= {}",
-                        value.stop_profit_condition,
-                        value.price
-                    );
-                }
-            }
-
-            if value.stop_loss_condition != 0.0 {
-                if value.stop_loss_condition <= value.price {
-                    anyhow::bail!(
-                        "sell short, but stop loss <= price: {} <= {}",
-                        value.stop_loss_condition,
-                        value.price
-                    );
-                }
-            }
-        };
-
-        // 检查平仓量是否小于等于持仓量
-        if value.side == Side::BuySell && value.side == Side::SellLong {
-            if let Some(v) = self
-                .position
-                .iter()
-                .find(|v| v.0.product == value.product)
-                .map(|v| &v.0)
-            {
-                anyhow::ensure!(
-                    value.quantity <= v.open_quantity,
-                    "close quantity must be less than or equal open quantity"
-                );
             } else {
-                anyhow::bail!("no position: {}", value.product);
+                quantity.to_quantity(self.config.initial_margin)
+                    * min_unit
+                    * self.config.lever as f64
+            };
+
+            // 开仓数量不能小于最小下单数量
+            if quantity < min_unit {
+                anyhow::bail!(
+                    "product {}: open quantity < min unit: {} < {}",
+                    product,
+                    quantity,
+                    min_unit
+                );
             }
-        }
 
-        // 检查余额
-        if self.balance <= value.margin + self.config.fee {
-            anyhow::bail!(
-                "insufficient fund: balance < margin + fee: {} < {} + {}",
-                self.balance,
-                value.margin,
-                self.config.fee
+            // 仓位维持保证金
+            let margin = quantity / self.config.lever as f64;
+
+            // 检查余额
+            if self.balance < margin + self.config.fee {
+                anyhow::bail!(
+                    "product {}: insufficient fund: balance < position margin + fee: {} < {} + {}",
+                    product,
+                    self.balance,
+                    margin,
+                    self.config.fee
+                );
+            }
+
+            // 检查止盈止损参数
+            if stop_profit_condition == 0.0 && stop_profit != 0.0 {
+                anyhow::bail!(
+                    "product {}: the stop profit must be zero, because the stop profit condition is zero",
+                    product
+                );
+            }
+
+            if stop_loss_condition == 0.0 && stop_loss != 0.0 {
+                anyhow::bail!(
+                    "product {}: the stop loss must be zero, because the stop loss condition is zero",
+                    product
+                )
+            }
+
+            // 检查止盈止损是否有利于仓位
+            let stop_profit_condition =
+                price + stop_profit_condition.to_quantity(price) * side.factor();
+
+            let stop_loss_condition =
+                price + stop_loss_condition.to_quantity(price) * side.neg().factor();
+
+            if side == Side::BuyLong {
+                if stop_profit_condition != 0.0 {
+                    if stop_profit_condition <= price {
+                        anyhow::bail!(
+                            "product {}: buy long, but stop profit <= price: {} <= {}",
+                            product,
+                            stop_profit_condition,
+                            price
+                        );
+                    }
+                }
+
+                if stop_loss_condition != 0.0 {
+                    if stop_loss_condition >= price {
+                        anyhow::bail!(
+                            "product {}: buy long, but stop loss >= price: {} >= {}",
+                            product,
+                            stop_loss_condition,
+                            price
+                        );
+                    }
+                }
+            } else {
+                if stop_profit_condition != 0.0 {
+                    if stop_profit_condition >= price {
+                        anyhow::bail!(
+                            "product {}: buy long, but stop profit >= price: {} >= {}",
+                            product,
+                            stop_profit_condition,
+                            price
+                        );
+                    }
+                }
+
+                if stop_loss_condition != 0.0 {
+                    if stop_loss_condition <= price {
+                        anyhow::bail!(
+                            "product {}: buy long, but stop loss <= price: {} <= {}",
+                            product,
+                            stop_loss_condition,
+                            price
+                        );
+                    }
+                }
+            };
+
+            let id = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            self.delegate.insert(
+                id,
+                Delegate {
+                    product: product.to_string(),
+                    isolated: self.config.isolated,
+                    lever: self.config.lever,
+                    side,
+                    price,
+                    quantity,
+                    margin,
+                    stop_profit_condition,
+                    stop_loss_condition,
+                    stop_profit: price + stop_profit.to_quantity(price) * side.factor(),
+                    stop_loss: price + stop_loss.to_quantity(price) * side.neg().factor(),
+                },
             );
+
+            return Ok(id);
         }
 
-        self.balance -= value.margin + self.config.fee;
+        if let Some(v) = self
+            .position
+            .iter()
+            .find(|v| v.0.product == product)
+            .map(|v| &v.0)
+        {
+            // 最小下单数量
+            let min_unit = min_unit * v.open_price;
 
-        let id = std::time::SystemTime::now()
-            .duration_since(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
+            // 转换百分比
+            let quantity = if quantity == 0.0 {
+                v.open_quantity
+            } else {
+                (quantity.to_quantity(v.open_quantity) / min_unit).floor() as f64
+            };
 
-        self.delegate.insert(id, value);
+            // 平仓数量不能小于最小下单数量
+            if quantity < min_unit {
+                anyhow::bail!(
+                    "product {}: open quantity < min unit: {} < {}",
+                    product,
+                    quantity,
+                    min_unit
+                );
+            }
 
-        Ok(id)
+            // 平仓量要小于持仓量
+            if quantity > v.open_quantity {
+                anyhow::bail!(
+                    "product {}: close quantity > open quantity: {} > {}",
+                    product,
+                    quantity,
+                    v.open_quantity,
+                );
+            };
+
+            let id = std::time::SystemTime::now()
+                .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+
+            self.delegate.insert(
+                id,
+                Delegate {
+                    product: product.to_string(),
+                    isolated: self.config.isolated,
+                    lever: self.config.lever,
+                    side,
+                    price,
+                    quantity,
+                    margin: quantity / self.config.lever as f64,
+                    stop_profit_condition: 0.0,
+                    stop_loss_condition: 0.0,
+                    stop_profit: 0.0,
+                    stop_loss: 0.0,
+                },
+            );
+
+            return Ok(id);
+        }
+
+        anyhow::bail!("no position: {}", product);
     }
 
     /// 取消订单。
@@ -376,283 +503,287 @@ impl MatchmakingEngine {
         self.delegate.remove(&value);
     }
 
-    /// 更新仓位。
-    ///
-    /// * `pair` 交易产品，价格，面值。
-    pub fn update<'a, T>(&mut self, time: u64, pair: T) -> anyhow::Result<()>
-    where
-        T: AsRef<[(&'a str, f64, f64)]>,
-    {
-        let pair = pair.as_ref();
+    /// 更新。
+    pub fn update(&mut self) {
+        // let time = self.ready.0;
+        // let ready = self.ready.1.as_ref();
 
-        // 处理跟随仓位的委托
-        for (position, sub_delegate) in self.position.iter_mut() {
-            for price in pair.iter().filter(|v| v.0 == position.product).map(|v| v.1) {
-                for i in (0..sub_delegate.len()).rev() {
-                    let delegate = &mut sub_delegate[i];
-                    if delegate.side == Side::BuySell && price >= delegate.condition
-                        || price <= delegate.condition
-                    {
-                        if delegate.price == 0.0 {
-                            // TODO: 注意这里，使用市价还是 condition？
-                            // TODO: 注意计算平仓量
-                            // TODO: 保证金计算可能不准确，考虑加入 margin
-                            // 限价触发，市价委托
-                            let profit = (price - position.open_price) * delegate.quantity
-                                / position.open_price;
+        // // 处理跟随仓位的委托
+        // for (position, sub_delegate) in self.position.iter_mut() {
+        //     for price in ready
+        //         .iter()
+        //         .filter(|v| v.0 == position.product)
+        //         .map(|v| v.1)
+        //     {
+        //         for i in (0..sub_delegate.len()).rev() {
+        //             let delegate = &mut sub_delegate[i];
+        //             if delegate.side == Side::BuySell && price >= delegate.condition
+        //                 || price <= delegate.condition
+        //             {
+        //                 if delegate.price == 0.0 {
+        //                     // TODO: 注意这里，使用市价还是 condition？
+        //                     // TODO: 注意计算平仓量
+        //                     // TODO: 保证金计算可能不准确，考虑加入 margin
+        //                     // 限价触发，市价委托
+        //                     let profit = (price - position.open_price) * delegate.quantity
+        //                         / position.open_price;
 
-                            let save = position.margin;
+        //                     let save = position.margin;
 
-                            position.margin = (position.open_quantity - delegate.quantity)
-                                / position.lever as f64;
+        //                     position.margin = (position.open_quantity - delegate.quantity)
+        //                         / position.lever as f64;
 
-                            let margin = save - position.margin;
+        //                     let margin = save - position.margin;
 
-                            let profit_ratio = profit / margin;
+        //                     let profit_ratio = profit / margin;
 
-                            self.balance += profit;
+        //                     self.balance += profit;
 
-                            self.balance += margin;
+        //                     self.balance += margin;
 
-                            self.balance -= self.config.fee;
+        //                     self.balance -= self.config.fee;
 
-                            position.fee += self.config.fee;
+        //                     position.fee += self.config.fee;
 
-                            position.list.push(SubPosition {
-                                side: delegate.side,
-                                price: delegate.condition,
-                                quantity: delegate.quantity,
-                                margin,
-                                profit,
-                                profit_ratio,
-                                time,
-                            });
+        //                     position.list.push(SubPosition {
+        //                         side: delegate.side,
+        //                         price: delegate.condition,
+        //                         quantity: delegate.quantity,
+        //                         margin,
+        //                         profit,
+        //                         profit_ratio,
+        //                         time,
+        //                     });
 
-                            sub_delegate.swap_remove(i);
-                            // TODO: 删除平仓委托
-                        } else {
-                            // 限价触发，限价委托
-                            delegate.condition = delegate.price;
-                        }
-                    }
-                }
-            }
-        }
+        //                     sub_delegate.swap_remove(i);
+        //                     // TODO: 删除平仓委托
+        //                 } else {
+        //                     // 限价触发，限价委托
+        //                     delegate.condition = delegate.price;
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
 
-        // 处理盈亏
-        for (product, price, _) in pair {
-            for i in self.position.iter_mut().filter(|v| v.0.product == *product) {
-                i.0.profit = (price - i.0.open_price) * i.0.open_quantity / i.0.open_price;
-                i.0.profit_ratio = i.0.profit / i.0.margin;
-                // 应该卖出的时候才计算盈亏
-                // 考虑加上 fee 给清单
-                for i in
-                    i.0.list
-                        .iter_mut()
-                        .filter(|v| v.side == Side::BuySell || v.side == Side::SellLong)
-                {
-                    i.profit = (price - i.price) * i.quantity / i.price;
-                    i.profit = i.profit / i.margin;
-                }
-            }
-        }
+        // // 处理盈亏
+        // for (product, price, _) in ready {
+        //     for i in self.position.iter_mut().filter(|v| v.0.product == *product) {
+        //         i.0.profit = (price - i.0.open_price) * i.0.open_quantity / i.0.open_price;
+        //         i.0.profit_ratio = i.0.profit / i.0.margin;
+        //         // 应该卖出的时候才计算盈亏
+        //         // 考虑加上 fee 给清单
+        //         for i in
+        //             i.0.list
+        //                 .iter_mut()
+        //                 .filter(|v| v.side == Side::BuySell || v.side == Side::SellLong)
+        //         {
+        //             i.profit = (price - i.price) * i.quantity / i.price;
+        //             i.profit = i.profit / i.margin;
+        //         }
+        //     }
+        // }
 
-        // 处理强平
-        'a: for (product, price, _) in pair {
-            for i in (0..self.position.len()).rev() {
-                let v = &self.position[i];
-                if *product == v.0.product
-                    && (v.0.side == Side::BuyLong && *price <= v.0.liquidation_price
-                        || v.0.side == Side::SellShort && *price >= v.0.liquidation_price)
-                {
-                    if v.0.isolated {
-                        // TODO: 全仓强平价格是一直变的
-                        // TODO: 逐仓强平价格应该是精准的？不是！
-                        // TODO: 注意这里，使用市价还是 condition？
-                        let mut v = self.position.swap_remove(i);
-                        v.0.close_price = *price;
-                        v.0.close_time = time;
-                        self.history.push(v.0);
-                        // TODO: 强平也加入子仓位？
-                    } else {
-                        for (product, price, _) in pair {
-                            for i in (0..self.position.len()).rev() {
-                                let v = &self.position[i];
-                                if *product == v.0.product {
-                                    // TODO: 注意这里，使用市价还是 condition？
-                                    let mut v = self.position.swap_remove(i);
-                                    v.0.close_price = *price;
-                                    v.0.close_time = time;
-                                    self.history.push(v.0);
-                                    // TODO: 强平也加入子仓位？
-                                }
-                            }
-                        }
-                        break 'a;
-                    }
-                }
-            }
-        }
+        // // 处理强平
+        // 'a: for (product, price, _) in ready {
+        //     for i in (0..self.position.len()).rev() {
+        //         let v = &self.position[i];
+        //         if *product == v.0.product
+        //             && (v.0.side == Side::BuyLong && *price <= v.0.liquidation_price
+        //                 || v.0.side == Side::SellShort && *price >= v.0.liquidation_price)
+        //         {
+        //             if v.0.isolated {
+        //                 // TODO: 全仓强平价格是一直变的
+        //                 // TODO: 逐仓强平价格应该是精准的？不是！
+        //                 // TODO: 注意这里，使用市价还是 condition？
+        //                 let mut v = self.position.swap_remove(i);
+        //                 v.0.close_price = *price;
+        //                 v.0.close_time = time;
+        //                 self.history.push(v.0);
+        //                 // TODO: 强平也加入子仓位？
+        //             } else {
+        //                 for (product, price, _) in ready {
+        //                     for i in (0..self.position.len()).rev() {
+        //                         let v = &self.position[i];
+        //                         if *product == v.0.product {
+        //                             // TODO: 注意这里，使用市价还是 condition？
+        //                             let mut v = self.position.swap_remove(i);
+        //                             v.0.close_price = *price;
+        //                             v.0.close_time = time;
+        //                             self.history.push(v.0);
+        //                             // TODO: 强平也加入子仓位？
+        //                         }
+        //                     }
+        //                 }
+        //                 break 'a;
+        //             }
+        //         }
+        //     }
+        // }
 
-        // 处理委托
-        self.delegate.retain(|_, delegate| {
-            for price in pair.iter().filter(|v| v.0 == delegate.product).map(|v| v.1) {
-                // 平仓委托
-                if delegate.side == Side::BuySell || delegate.side == Side::SellLong {
-                    let sub_delegate = self
-                        .position
-                        .iter_mut()
-                        .find(|v| v.0.product == delegate.product)
-                        .map(|v| &mut v.1)
-                        .unwrap();
+        // // 处理委托
+        // self.delegate.retain(|_, delegate| {
+        //     for price in ready
+        //         .iter()
+        //         .filter(|v| v.0 == delegate.product)
+        //         .map(|v| v.1)
+        //     {
+        //         // 平仓委托
+        //         if delegate.side == Side::BuySell || delegate.side == Side::SellLong {
+        //             let sub_delegate = self
+        //                 .position
+        //                 .iter_mut()
+        //                 .find(|v| v.0.product == delegate.product)
+        //                 .map(|v| &mut v.1)
+        //                 .unwrap();
 
-                    sub_delegate.push(SubDelegate {
-                        side: delegate.side,
-                        quantity: delegate.quantity,
-                        condition: delegate.price,
-                        price,
-                    });
+        //             sub_delegate.push(SubDelegate {
+        //                 side: delegate.side,
+        //                 quantity: delegate.quantity,
+        //                 condition: delegate.price,
+        //                 price,
+        //             });
 
-                    return false;
-                }
+        //             return false;
+        //         }
 
-                if delegate.isolated {
-                    let margin = delegate.quantity / delegate.lever as f64;
+        //         if delegate.isolated {
+        //             let margin = delegate.quantity / delegate.lever as f64;
 
-                    // 查找现有仓位
-                    let position = self.position.iter_mut().find(|v| {
-                        v.0.product == delegate.product
-                            && if self.config.position_mode {
-                                v.0.side == delegate.side
-                            } else {
-                                true
-                            }
-                    });
+        //             // 查找现有仓位
+        //             let position = self.position.iter_mut().find(|v| {
+        //                 v.0.product == delegate.product
+        //                     && if self.config.position_mode {
+        //                         v.0.side == delegate.side
+        //                     } else {
+        //                         true
+        //                     }
+        //             });
 
-                    // 计算开仓均价
-                    let (new_side, new_price, new_quantity) = match position.as_ref() {
-                        Some(v) => {
-                            let quantity = v.0.open_quantity * v.0.side.factor()
-                                + delegate.quantity * delegate.side.factor();
+        //             // 计算开仓均价
+        //             let (new_side, new_price, new_quantity) = match position.as_ref() {
+        //                 Some(v) => {
+        //                     let quantity = v.0.open_quantity * v.0.side.factor()
+        //                         + delegate.quantity * delegate.side.factor();
 
-                            let side = if quantity == 0.0 {
-                                delegate.side
-                            } else if quantity > 0.0 {
-                                Side::BuyLong
-                            } else {
-                                Side::SellShort
-                            };
+        //                     let side = if quantity == 0.0 {
+        //                         delegate.side
+        //                     } else if quantity > 0.0 {
+        //                         Side::BuyLong
+        //                     } else {
+        //                         Side::SellShort
+        //                     };
 
-                            let a = v.0.open_price * v.0.open_quantity * side.factor();
-                            let b = delegate.price * delegate.quantity * delegate.side.factor();
-                            let open_price = (a + b) / (v.0.open_quantity + delegate.quantity);
+        //                     let a = v.0.open_price * v.0.open_quantity * side.factor();
+        //                     let b = delegate.price * delegate.quantity * delegate.side.factor();
+        //                     let open_price = (a + b) / (v.0.open_quantity + delegate.quantity);
 
-                            (side, open_price, quantity.abs())
-                        }
-                        None => (delegate.side, delegate.price, delegate.quantity.abs()),
-                    };
+        //                     (side, open_price, quantity.abs())
+        //                 }
+        //                 None => (delegate.side, delegate.price, delegate.quantity.abs()),
+        //             };
 
-                    // 做多强平价格 = (入场价格 × (1 - 初始保证金率 + 维持保证金率)) - (追加保证金 / 仓位数量)
-                    // 做空强平价格 = (入场价格 × (1 + 初始保证金率 - 维持保证金率)) + (追加保证金 / 仓位数量)
-                    // 初始保证金率 = 1 / 杠杆
-                    // 维持保证金率 = 0.005
-                    // 追加保证金 = 账户余额 - 初始化保证金
-                    // 初始保证金 = 入场价格 / 杠杆
-                    let imr = 1.0 / self.config.lever as f64;
-                    let mmr = self.config.maintenance;
-                    let liquidation_price =
-                        new_price * (1.0 + imr * -new_side.factor() + mmr * new_side.factor());
+        //             // 做多强平价格 = (入场价格 × (1 - 初始保证金率 + 维持保证金率)) - (追加保证金 / 仓位数量)
+        //             // 做空强平价格 = (入场价格 × (1 + 初始保证金率 - 维持保证金率)) + (追加保证金 / 仓位数量)
+        //             // 初始保证金率 = 1 / 杠杆
+        //             // 维持保证金率 = 0.005
+        //             // 追加保证金 = 账户余额 - 初始化保证金
+        //             // 初始保证金 = 入场价格 / 杠杆
+        //             let imr = 1.0 / self.config.lever as f64;
+        //             let mmr = self.config.maintenance;
+        //             let liquidation_price =
+        //                 new_price * (1.0 + imr * -new_side.factor() + mmr * new_side.factor());
 
-                    if price <= delegate.price {
-                        // 子仓位
-                        let cp = SubPosition {
-                            side: delegate.side,
-                            price: delegate.price,
-                            quantity: delegate.quantity,
-                            margin,
-                            profit: 0.0,
-                            profit_ratio: 0.0,
-                            time,
-                        };
+        //             if price <= delegate.price {
+        //                 // 子仓位
+        //                 let cp = SubPosition {
+        //                     side: delegate.side,
+        //                     price: delegate.price,
+        //                     quantity: delegate.quantity,
+        //                     margin,
+        //                     profit: 0.0,
+        //                     profit_ratio: 0.0,
+        //                     time,
+        //                 };
 
-                        // 止盈委托
-                        let sp = SubDelegate {
-                            side: delegate.side.neg(),
-                            quantity: delegate.quantity,
-                            condition: delegate.stop_profit_condition,
-                            price: delegate.stop_profit,
-                        };
+        //                 // 止盈委托
+        //                 let sp = SubDelegate {
+        //                     side: delegate.side.neg(),
+        //                     quantity: delegate.quantity,
+        //                     condition: delegate.stop_profit_condition,
+        //                     price: delegate.stop_profit,
+        //                 };
 
-                        // 止损委托
-                        let sl = SubDelegate {
-                            side: delegate.side.neg(),
-                            quantity: delegate.quantity,
-                            condition: delegate.stop_loss_condition,
-                            price: delegate.stop_loss,
-                        };
+        //                 // 止损委托
+        //                 let sl = SubDelegate {
+        //                     side: delegate.side.neg(),
+        //                     quantity: delegate.quantity,
+        //                     condition: delegate.stop_loss_condition,
+        //                     price: delegate.stop_loss,
+        //                 };
 
-                        match position {
-                            Some((position, sub_delegate)) => {
-                                // 已经存在仓位
-                                position.side = new_side;
-                                position.open_price = new_price;
-                                position.open_quantity = new_quantity;
-                                position.margin += margin;
-                                position.liquidation_price = liquidation_price;
-                                position.fee += self.config.fee;
-                                position.list.push(cp);
+        //                 match position {
+        //                     Some((position, sub_delegate)) => {
+        //                         // 已经存在仓位
+        //                         position.side = new_side;
+        //                         position.open_price = new_price;
+        //                         position.open_quantity = new_quantity;
+        //                         position.margin += margin;
+        //                         position.liquidation_price = liquidation_price;
+        //                         position.fee += self.config.fee;
+        //                         position.list.push(cp);
 
-                                if sp.condition != 0.0 {
-                                    sub_delegate.push(sp);
-                                }
+        //                         if sp.condition != 0.0 {
+        //                             sub_delegate.push(sp);
+        //                         }
 
-                                if sl.condition != 0.0 {
-                                    sub_delegate.push(sl);
-                                }
-                            }
-                            None => {
-                                // 新建仓位
-                                let mut position = Position {
-                                    product: delegate.product.clone(),
-                                    isolated: delegate.isolated,
-                                    lever: self.config.lever,
-                                    side: new_side,
-                                    open_price: new_price,
-                                    open_quantity: new_quantity,
-                                    margin,
-                                    liquidation_price,
-                                    close_price: 0.0,
-                                    profit: 0.0,
-                                    profit_ratio: 0.0,
-                                    fee: self.config.fee,
-                                    open_time: time,
-                                    close_time: 0,
-                                    list: Vec::new(),
-                                };
+        //                         if sl.condition != 0.0 {
+        //                             sub_delegate.push(sl);
+        //                         }
+        //                     }
+        //                     None => {
+        //                         // 新建仓位
+        //                         let mut position = Position {
+        //                             product: delegate.product.clone(),
+        //                             isolated: delegate.isolated,
+        //                             lever: self.config.lever,
+        //                             side: new_side,
+        //                             open_price: new_price,
+        //                             open_quantity: new_quantity,
+        //                             margin,
+        //                             liquidation_price,
+        //                             close_price: 0.0,
+        //                             profit: 0.0,
+        //                             profit_ratio: 0.0,
+        //                             fee: self.config.fee,
+        //                             open_time: time,
+        //                             close_time: 0,
+        //                             list: Vec::new(),
+        //                         };
 
-                                position.list.push(cp);
+        //                         position.list.push(cp);
 
-                                let mut sub_delegate = Vec::new();
+        //                         let mut sub_delegate = Vec::new();
 
-                                if sp.condition != 0.0 {
-                                    sub_delegate.push(sp);
-                                }
+        //                         if sp.condition != 0.0 {
+        //                             sub_delegate.push(sp);
+        //                         }
 
-                                if sl.condition != 0.0 {
-                                    sub_delegate.push(sl);
-                                }
+        //                         if sl.condition != 0.0 {
+        //                             sub_delegate.push(sl);
+        //                         }
 
-                                self.position.push((position, sub_delegate));
-                            }
-                        };
-                    }
-                    return false;
-                }
+        //                         self.position.push((position, sub_delegate));
+        //                     }
+        //                 };
+        //             }
+        //             return false;
+        //         }
 
-                return true;
-            }
-            return true;
-        });
+        //         return true;
+        //     }
+        //     return true;
+        // });
 
         // for price in pair.iter().filter(|v| v.0 == delegate.product).map(|v| v.1) {
         //     // 平仓委托
@@ -790,8 +921,6 @@ impl MatchmakingEngine {
 
         //     self.delegate.remove(id);
         // }
-
-        Ok(())
     }
 }
 

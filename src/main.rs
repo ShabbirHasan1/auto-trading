@@ -2,17 +2,22 @@ use auto_trading::*;
 
 #[tokio::main]
 async fn main() {
-    let mut x = 0;
+    let mut ok = true;
 
     let strategy = |cx: &mut Context| {
         // 跌破前低做多
         let low = lowest(&cx.close[1..], 30);
+        let highest = highest(&cx.close[1..], 30);
         if cx.close < low {
-            if x <= 3 {
+            if ok {
                 println!("做多 {}, time {}", cx.close[0], cx.time);
                 cx.order(Side::BuyLong, 0.0).unwrap();
-                x += 1;
+                ok = false;
             }
+        } else if cx.close < highest {
+            println!("平多 {}, time {}", cx.close[0], cx.time);
+            ok = true;
+            cx.order(Side::BuySell, 0.0).unwrap();
         }
     };
 
