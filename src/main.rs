@@ -4,20 +4,30 @@ use auto_trading::*;
 async fn main() {
     let mut ok = true;
 
+    // TODO: 实现 close 到 Unit
+
     let strategy = |cx: &mut Context| {
         // 跌破前低做多
         let low = lowest(&cx.close[1..], 30);
         let highest = highest(&cx.close[1..], 30);
         if cx.close < low {
             if ok {
-                println!("做多 {}, time {}", cx.close[0], cx.time);
-                cx.order(Side::BuyLong, 0.0).unwrap();
+                println!(
+                    "{}: 做多 {}: {:?}",
+                    time_to_string(cx.time),
+                    cx.close[0],
+                    cx.order(Side::BuyLong, 0.0)
+                );
                 ok = false;
             }
-        } else if cx.close < highest {
-            println!("平多 {}, time {}", cx.close[0], cx.time);
+        } else if cx.close < highest && !ok {
+            println!(
+                "{}: 平多 {}: {:?}",
+                time_to_string(cx.time),
+                cx.close[0],
+                cx.order(Side::BuySell, 0.0)
+            );
             ok = true;
-            cx.order(Side::BuySell, 0.0).unwrap();
         }
     };
 
@@ -33,7 +43,7 @@ async fn main() {
 
     let config = Config::new()
         .initial_margin(1000.0)
-        .lever(20)
+        .lever(35)
         .margin(10)
         .isolated(true);
 
@@ -80,5 +90,3 @@ async fn main() {
 //     .join(",");
 
 // std::fs::write("./k.txt", c).unwrap();
-
-// return;

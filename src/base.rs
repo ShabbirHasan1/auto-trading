@@ -413,8 +413,8 @@ impl Side {
         match self {
             Side::BuyLong => 1.0,
             Side::SellShort => -1.0,
-            Side::BuySell => panic!("buy sell cannot get factor"),
-            Side::SellLong => panic!("sell long cannot get factor"),
+            Side::BuySell => 1.0,
+            Side::SellLong => -1.0,
         }
     }
 
@@ -423,8 +423,8 @@ impl Side {
         match self {
             Side::BuyLong => Side::BuySell,
             Side::SellShort => Side::SellLong,
-            Side::BuySell => panic!("buy sell cannot get neg"),
-            Side::SellLong => panic!("sell long cannot get neg"),
+            Side::BuySell => Side::BuyLong,
+            Side::SellLong => Side::SellShort,
         }
     }
 }
@@ -481,6 +481,9 @@ pub struct SubPosition {
     /// 保证金。
     pub margin: f64,
 
+    /// 手续费。
+    pub fee: f64,
+
     /// 收益。
     pub profit: f64,
 
@@ -510,7 +513,7 @@ pub struct Position {
     pub open_price: f64,
 
     /// 持仓量。
-    pub open_quantity: f64,
+    pub quantity: f64,
 
     /// 保证金。
     pub margin: f64,
@@ -803,7 +806,7 @@ impl Config {
         self
     }
 
-    /// 进场和出场的手续费。
+    /// 挂单和吃单的手续费比例。
     pub fn fee(mut self, value: f64) -> Self {
         self.fee = value;
         self

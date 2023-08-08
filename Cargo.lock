@@ -56,7 +56,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "chrono",
- "lazy_static",
  "reqwest",
  "serde",
  "serde_json",

@@ -17,11 +17,11 @@ pub trait Bourse {
         S: AsRef<str>,
         S: Send;
 
-    /// 获取单笔最小交易数量。
+    /// 获取面值。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `return` 面值，1张 = 价格 * 面值。
-    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send;
@@ -124,7 +124,7 @@ impl Bourse for LocalBourse {
             })
     }
 
-    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
@@ -299,7 +299,7 @@ impl Bourse for Okx {
         Ok(result)
     }
 
-    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
@@ -500,7 +500,7 @@ impl crate::Bourse for Binance {
         Ok(result)
     }
 
-    async fn get_min_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
@@ -538,9 +538,9 @@ mod tests {
     #[tokio::test]
     async fn okx_get_min_unit() {
         let bourse = Okx::new().unwrap();
-        let x = bourse.get_min_unit("BTC-USDT-SWAP").await.unwrap();
+        let x = bourse.get_unit("BTC-USDT-SWAP").await.unwrap();
         assert!(x == 0.01);
-        let x = bourse.get_min_unit("BTC-USDT").await.unwrap();
+        let x = bourse.get_unit("BTC-USDT").await.unwrap();
         assert!(x == 0.00001);
     }
 
