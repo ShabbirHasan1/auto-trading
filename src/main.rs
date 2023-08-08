@@ -4,7 +4,9 @@ use auto_trading::*;
 async fn main() {
     let mut ok = true;
 
+    // TODO: factor 好像有非常大的 bug！！！
     // TODO: 实现 close 到 Unit
+    // TODO: 加上手续费测试
 
     let strategy = |cx: &mut Context| {
         // 跌破前低做多
@@ -56,7 +58,7 @@ async fn main() {
             "ETH-USDT-SWAP",
             Level::Hour4,
             Level::Minute1,
-            1659539044000..1691075044000,
+            1683555251000..1691075044000,
         )
         .await
         .unwrap();
