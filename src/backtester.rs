@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use crate::*;
 
 /// 回测器。
@@ -438,7 +436,7 @@ impl MatchmakingEngine {
             let id = std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_millis() as u64;
+                .as_nanos() as u64;
 
             self.delegate.insert(
                 id,
@@ -501,7 +499,7 @@ impl MatchmakingEngine {
             let id = std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap()
-                .as_millis() as u64;
+                .as_nanos() as u64;
 
             self.delegate.insert(
                 id,
@@ -533,21 +531,6 @@ impl MatchmakingEngine {
 
     /// 更新。
     pub fn update(&mut self) {
-        // TODO: is_config 让我有点不爽
-
-        // TODO: !!!!!!!!!!!!!!!!!!!!!!!!!!
-        // 强平的盈亏计算和止盈止损的盈亏计算有冲突
-        // 因为一个是以市价，另一个以限价
-
-        // 处理盈亏
-        for (product, (_, _, price)) in self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
-        {
-            for i in self.position.iter_mut().filter(|v| v.0.product == product) {
-                i.0.profit = (price - i.0.open_price) * i.0.quantity / i.0.open_price;
-                i.0.profit_ratio = i.0.profit / i.0.margin;
-            }
-        }
-
         // 处理强平
         'a: for (product, (_, time, price)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
@@ -560,6 +543,10 @@ impl MatchmakingEngine {
                 {
                     if self.config.isolated {
                         let mut position = self.position.swap_remove(i).0;
+                        position.profit = (position.liquidation_price - position.open_price)
+                            * position.quantity
+                            / position.open_price;
+                        position.profit_ratio = position.profit / position.margin;
 
                         let mut max = 0.0;
                         let mut sum = 0.0;
@@ -579,7 +566,7 @@ impl MatchmakingEngine {
 
                         // 最大保证金
                         position.margin = max / self.config.lever as f64;
-                        position.close_price = price;
+                        position.close_price = position.liquidation_price;
                         position.close_time = time;
                         self.history.push(position);
                     } else {
@@ -590,6 +577,12 @@ impl MatchmakingEngine {
                                 let position = &self.position[i].0;
                                 if position.product == product {
                                     let mut position = self.position.swap_remove(i).0;
+                                    position.profit = (position.liquidation_price
+                                        - position.open_price)
+                                        * position.quantity
+                                        / position.open_price;
+                                    position.profit_ratio = position.profit / position.margin;
+
                                     let mut max = 0.0;
                                     let mut sum = 0.0;
 
@@ -611,7 +604,7 @@ impl MatchmakingEngine {
 
                                     // 最大保证金
                                     position.margin = max / self.config.lever as f64;
-                                    position.close_price = price;
+                                    position.close_price = position.liquidation_price;
                                     position.close_time = time;
                                     self.history.push(position);
                                 }
@@ -890,6 +883,8 @@ impl MatchmakingEngine {
                                 position.quantity -= delegate.quantity;
                                 position.margin -= margin;
                                 position.fee += fee;
+                                position.profit += profit;
+                                position.profit_ratio += profit / margin;
                                 self.balance += profit;
                                 self.balance += margin;
                                 self.balance -= fee;

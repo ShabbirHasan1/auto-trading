@@ -7,29 +7,21 @@ async fn main() {
     // TODO: factor 好像有非常大的 bug！！！
     // TODO: 实现 close 到 Unit
     // TODO: 加上手续费测试
+    // Source 重载运算符
+    // 如果直接使用具体的市价会怎样
 
     let strategy = |cx: &mut Context| {
-        // 跌破前低做多
-        let low = lowest(&cx.close[1..], 30);
-        let highest = highest(&cx.close[1..], 30);
-        if cx.close < low {
-            if ok {
-                println!(
-                    "{}: 做多 {}: {:?}",
-                    time_to_string(cx.time),
-                    cx.close[0],
-                    cx.order(Side::BuyLong, 0.0)
-                );
-                ok = false;
-            }
-        } else if cx.close < highest && !ok {
-            println!(
-                "{}: 平多 {}: {:?}",
-                time_to_string(cx.time),
-                cx.close[0],
-                cx.order(Side::BuySell, 0.0)
-            );
-            ok = true;
+        if (cx.open[0].min(cx.close[0]) - cx.low[0]).abs() >= 50.0 {
+            cx.order_condition(
+                Side::BuyLong,
+                0.0,
+                0.0,
+                cx.close[0] + 50.0,
+                0,
+                cx.close[0] - 50.0,
+                0.0,
+            )
+            .unwrap();
         }
     };
 
