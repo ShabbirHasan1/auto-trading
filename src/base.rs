@@ -130,13 +130,13 @@ impl Source {
     }
 }
 
-impl PartialEq<f64> for &Source {
+impl PartialEq<f64> for Source {
     fn eq(&self, other: &f64) -> bool {
         self[0] == *other
     }
 }
 
-impl PartialOrd<f64> for &Source {
+impl PartialOrd<f64> for Source {
     fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
         self[0].partial_cmp(other)
     }
@@ -156,6 +156,16 @@ impl std::ops::Deref for Source {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+impl<'a> IntoIterator for &'a Source {
+    type Item = &'a f64;
+
+    type IntoIter = std::slice::Iter<'a, f64>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
     }
 }
 

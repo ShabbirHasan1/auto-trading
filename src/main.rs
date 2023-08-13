@@ -4,24 +4,29 @@ use auto_trading::*;
 async fn main() {
     let mut ok = true;
 
-    // TODO: factor 好像有非常大的 bug！！！
-    // TODO: 实现 close 到 Unit
-    // TODO: 加上手续费测试
-    // Source 重载运算符
-    // 如果直接使用具体的市价会怎样
-
     let strategy = |cx: &mut Context| {
-        if (cx.open[0].min(cx.close[0]) - cx.low[0]).abs() >= 50.0 {
-            cx.order_condition(
-                Side::BuyLong,
-                0.0,
-                0.0,
-                cx.close[0] + 50.0,
-                0,
-                cx.close[0] - 50.0,
-                0.0,
-            )
-            .unwrap();
+        let cci20 = cci(cx.close, 20);
+
+        if cci20 <= -100.0 && ok {
+            let result = cx.order(Side::BuyLong, 0.0);
+            println!(
+                "做多 {} {} {:?}",
+                time_to_string(cx.time),
+                cx.close[0],
+                result
+            );
+            ok = false;
+        }
+
+        if cci20 >= 90.0 && !ok {
+            let result = cx.order(Side::BuySell, 0.0);
+            println!(
+                "平多 {} {} {:?}",
+                time_to_string(cx.time),
+                cx.close[0],
+                result
+            );
+            ok = true;
         }
     };
 
@@ -31,7 +36,7 @@ async fn main() {
         .level_k(
             "ETH-USDT-SWAP",
             Level::Hour4,
-            serde_json::from_str::<Vec<K>>(&std::fs::read_to_string("./k.txt").unwrap()).unwrap(),
+            serde_json::from_str::<Vec<K>>(&std::fs::read_to_string("./4hk.txt").unwrap()).unwrap(),
         )
         .min_unit("ETH-USDT-SWAP", 0.1);
 

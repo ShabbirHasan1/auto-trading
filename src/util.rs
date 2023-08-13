@@ -20,6 +20,20 @@ pub fn sma(source: &Source, length: usize) -> f64 {
     source.iter().take(length).sum::<f64>() / length as f64
 }
 
+pub fn sma_map<F>(source: &Source, length: usize, f: F) -> f64
+where
+    F: FnMut(&Source) -> f64,
+{
+    source
+        .iter()
+        .take(length)
+        .enumerate()
+        .map(|v| &source[v.0..])
+        .map(f)
+        .sum::<f64>()
+        / length as f64
+}
+
 pub fn ema(source: &Source, length: usize) -> f64 {
     let alpha = 2.0 / (length as f64 + 1.0);
     let mut sum = 0.0;
@@ -31,6 +45,11 @@ pub fn ema(source: &Source, length: usize) -> f64 {
         }
     }
     sum / length as f64
+}
+
+pub fn cci(source: &Source, length: usize) -> f64 {
+    let ma = sma(source, length);
+    (source[0] - ma) / (0.015 * sma_map(source, length, |v| (v[0] - ma).abs()))
 }
 
 /// 时间戳转换到本地时间文本。
