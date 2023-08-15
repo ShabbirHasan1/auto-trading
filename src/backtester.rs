@@ -71,13 +71,13 @@ where
         let low = k.iter().map(|v| v.low).collect::<Vec<_>>();
         let close = k.iter().map(|v| v.close).collect::<Vec<_>>();
 
-        // 单笔最小交易数量
-        let min_unit = self.bourse.get_unit(product).await?;
+        // 面值
+        let unit = self.bourse.get_unit(product).await?;
 
         // 撮合引擎
         let me = std::cell::RefCell::new(MatchmakingEngine::new(self.config));
 
-        me.borrow_mut().product(product, min_unit);
+        me.borrow_mut().product(product, unit);
 
         for index in (0..time.len()).rev().into_iter() {
             let time = time[index];
@@ -112,6 +112,7 @@ where
             let mut cx = Context {
                 product,
                 level: strategy_level,
+                unit,
                 time,
                 open,
                 high,
@@ -127,9 +128,7 @@ where
             me.borrow_mut().update();
         }
 
-        println!("{:#?}", me.borrow().history);
-
-        Ok(Vec::new())
+        Ok(me.into_inner().history)
     }
 
     pub async fn get_k_range(
@@ -150,7 +149,6 @@ where
                     time = k.time;
                     result.extend(v);
                 } else {
-                    result.extend(v);
                     break;
                 }
             }
@@ -340,11 +338,16 @@ impl MatchmakingEngine {
                 );
             }
 
-            // 仓位维持保证金
-            let margin = quantity / self.config.lever as f64;
+            let margin = if self.config.margin == 0.0 {
+                // 仓位维持保证金
+                quantity / self.config.lever as f64
+            } else {
+                // 实际投入的保证金
+                self.config.margin.to_quantity(self.config.initial_margin)
+            };
 
             // 手续费
-            let fee = quantity * self.config.fee;
+            let fee = quantity * self.config.open_fee;
 
             // 检查余额
             if self.balance < margin + fee {
@@ -543,31 +546,45 @@ impl MatchmakingEngine {
                 {
                     if self.config.isolated {
                         let mut position = self.position.swap_remove(i).0;
+
                         position.profit = (position.liquidation_price - position.open_price)
                             * position.quantity
                             / position.open_price;
+
                         position.profit_ratio = position.profit / position.margin;
 
-                        let mut max = 0.0;
-                        let mut sum = 0.0;
+                        position.fee = position.list.iter().map(|v| v.fee).sum();
+
+                        let mut max_quantity = 0.0;
+                        let mut sum_quantity = 0.0;
+                        let mut max_margin = 0.0;
+                        let mut sum_margin = 0.0;
+
                         position
                             .list
                             .iter()
                             .filter(|v| v.side == Side::BuyLong || v.side == Side::SellShort)
                             .for_each(|v| {
-                                sum += v.quantity * v.side.factor();
-                                if sum > max {
-                                    max = sum;
+                                sum_quantity += v.quantity * v.side.factor();
+                                if sum_quantity > max_quantity {
+                                    max_quantity = sum_quantity;
+                                }
+                                sum_margin += v.margin * v.side.factor();
+                                if sum_margin > max_margin {
+                                    max_margin = sum_margin;
                                 }
                             });
 
                         // 最大持仓量
-                        position.quantity = max;
+                        position.quantity = max_quantity.abs();
 
                         // 最大保证金
-                        position.margin = max / self.config.lever as f64;
+                        position.margin = max_margin.abs();
+
                         position.close_price = position.liquidation_price;
+
                         position.close_time = time;
+
                         self.history.push(position);
                     } else {
                         for (product, (_, time, _)) in
@@ -640,69 +657,78 @@ impl MatchmakingEngine {
                                     }
                             });
 
-                            // 现有仓位的保证金
-                            let margin = if let Some(v) = &position {
-                                v.0.margin
-                            } else {
-                                0.0
-                            };
-
                             // 计算开仓均价
-                            let (new_side, new_price, new_quantity, new_margin) = match position
-                                .as_ref()
-                            {
-                                Some(v) => {
-                                    let mut quantity = v.0.quantity * v.0.side.factor()
-                                        + delegate.quantity * delegate.side.factor();
+                            let (new_side, new_price, new_quantity, new_margin, append_margin) =
+                                match position.as_ref() {
+                                    Some(v) => {
+                                        let mut quantity = v.0.quantity * v.0.side.factor()
+                                            + delegate.quantity * delegate.side.factor();
 
-                                    let side = if quantity == 0.0 {
-                                        delegate.side
-                                    } else if quantity > 0.0 {
-                                        Side::BuyLong
-                                    } else {
-                                        Side::SellShort
-                                    };
+                                        let side = if quantity == 0.0 {
+                                            delegate.side
+                                        } else if quantity > 0.0 {
+                                            Side::BuyLong
+                                        } else {
+                                            Side::SellShort
+                                        };
 
-                                    quantity = quantity.abs();
+                                        let open_price =
+                                            ((v.0.open_price * v.0.quantity * side.factor())
+                                                + (delegate.price
+                                                    * delegate.quantity
+                                                    * delegate.side.factor()))
+                                                / (v.0.quantity + delegate.quantity);
 
-                                    let a = v.0.open_price * v.0.quantity * side.factor();
-                                    let b =
-                                        delegate.price * delegate.quantity * delegate.side.factor();
-                                    let open_price = (a + b) / (v.0.quantity + delegate.quantity);
+                                        let append_margin = (v.0.margin
+                                            - v.0.quantity / self.config.lever as f64)
+                                            + (delegate.margin
+                                                - delegate.quantity / self.config.lever as f64);
 
-                                    (
-                                        side,
-                                        open_price,
-                                        quantity,
-                                        quantity / self.config.lever as f64,
-                                    )
-                                }
-                                None => (
-                                    delegate.side,
-                                    delegate.price,
-                                    delegate.quantity.abs(),
-                                    delegate.quantity / self.config.lever as f64,
-                                ),
-                            };
+                                        quantity = quantity.abs();
 
-                            // 做多强平价格 = (入场价格 × (1 - 初始保证金率 + 维持保证金率)) - (追加保证金 / 仓位数量)
-                            // 做空强平价格 = (入场价格 × (1 + 初始保证金率 - 维持保证金率)) + (追加保证金 / 仓位数量)
+                                        (
+                                            side,
+                                            open_price,
+                                            quantity,
+                                            quantity / self.config.lever as f64 + append_margin,
+                                            append_margin,
+                                        )
+                                    }
+                                    None => (
+                                        delegate.side,
+                                        delegate.price,
+                                        delegate.quantity,
+                                        delegate.margin,
+                                        delegate.margin
+                                            - delegate.quantity / self.config.lever as f64,
+                                    ),
+                                };
+
+                            // 做多强平价格 = 入场价格 × (1 - 初始保证金率 + 维持保证金率) - (追加保证金 / 仓位数量) + 吃单手续费
+                            // 做空强平价格 = 入场价格 × (1 + 初始保证金率 - 维持保证金率) + (追加保证金 / 仓位数量) - 吃单手续费
                             // 初始保证金率 = 1 / 杠杆
                             // 维持保证金率 = 0.005
                             // 追加保证金 = 账户余额 - 初始化保证金
                             // 初始保证金 = 入场价格 / 杠杆
                             let imr = 1.0 / self.config.lever as f64;
                             let mmr = self.config.maintenance;
-                            let liquidation_price = new_price
-                                * (1.0 + imr * -new_side.factor() + mmr * new_side.factor());
+                            let liquidation_price = if new_side == Side::BuyLong {
+                                new_price * (1.0 - imr + mmr)
+                                    - (append_margin / (new_quantity / new_price))
+                                    + delegate.quantity * self.config.close_fee
+                            } else {
+                                new_price * (1.0 + imr - mmr)
+                                    + (append_margin / (new_quantity / new_price))
+                                    - delegate.quantity * self.config.close_fee
+                            };
 
                             // 仓位记录
                             let cp = SubPosition {
                                 side: delegate.side,
                                 price: delegate.price,
                                 quantity: delegate.quantity,
-                                margin: new_margin - margin,
-                                fee: delegate.quantity * self.config.fee,
+                                margin: delegate.margin,
+                                fee: delegate.quantity * self.config.open_fee,
                                 profit: 0.0,
                                 profit_ratio: 0.0,
                                 time,
@@ -716,7 +742,6 @@ impl MatchmakingEngine {
                                     position.quantity = new_quantity;
                                     position.margin = new_margin;
                                     position.liquidation_price = liquidation_price;
-                                    position.fee = position.quantity * self.config.fee;
                                     position.list.push(cp);
 
                                     // 订单附带的止盈委托
@@ -775,7 +800,7 @@ impl MatchmakingEngine {
                                         close_price: 0.0,
                                         profit: 0.0,
                                         profit_ratio: 0.0,
-                                        fee: new_quantity * self.config.fee,
+                                        fee: 0.0,
                                         open_time: time,
                                         close_time: 0,
                                         list: Vec::new(),
@@ -876,18 +901,26 @@ impl MatchmakingEngine {
                             if delegate.price == 0.0 {
                                 // 限价触发，市价委托
                                 let margin = delegate.quantity / self.config.lever as f64;
-                                let fee = delegate.quantity * self.config.fee;
+
+                                let fee = delegate.quantity * self.config.close_fee;
+
                                 let profit = (delegate.condition - position.open_price)
                                     * delegate.quantity
                                     / position.open_price;
+
                                 position.quantity -= delegate.quantity;
+
                                 position.margin -= margin;
-                                position.fee += fee;
+
                                 position.profit += profit;
+
                                 position.profit_ratio += profit / margin;
+
+                                position.fee = position.list.iter().map(|v| v.fee).sum();
+
                                 self.balance += profit;
+
                                 self.balance += margin;
-                                self.balance -= fee;
 
                                 position.list.push(SubPosition {
                                     side: delegate.side,

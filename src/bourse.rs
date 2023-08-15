@@ -117,7 +117,7 @@ impl Bourse for LocalBourse {
                     })
                     .map(|v| {
                         v.iter()
-                            .filter(|v| time == 0 || v.time <= time)
+                            .filter(|v| time == 0 || v.time < time)
                             .cloned()
                             .collect()
                     })

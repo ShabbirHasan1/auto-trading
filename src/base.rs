@@ -402,7 +402,7 @@ impl From<std::ops::RangeToInclusive<u64>> for TimeRange {
 }
 
 /// 订单方向。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     /// 买入开多。
     BuyLong,
@@ -477,7 +477,7 @@ pub struct Delegate {
 }
 
 /// 清单仓位。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SubPosition {
     /// 持仓方向。
     pub side: Side,
@@ -505,7 +505,7 @@ pub struct SubPosition {
 }
 
 /// 仓位。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Position {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
@@ -560,6 +560,9 @@ pub struct Context<'a> {
 
     /// 时间级别。
     pub level: Level,
+
+    /// 最小下单数量。
+    pub unit: f64,
 
     /// K 线的时间。
     pub time: u64,
@@ -619,7 +622,7 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `quantity` 委托数量，开仓 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，平仓 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
     /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
     /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
@@ -766,7 +769,8 @@ pub struct Config {
     pub isolated: bool,
     pub position_mode: bool,
     pub lever: u32,
-    pub fee: f64,
+    pub open_fee: f64,
+    pub close_fee: f64,
     pub deviation: f64,
     pub maintenance: f64,
     pub margin: Unit,
@@ -782,7 +786,8 @@ impl Config {
             isolated: false,
             position_mode: false,
             lever: 1,
-            fee: 0.0,
+            open_fee: 0.0,
+            close_fee: 0.0,
             deviation: 0.0,
             maintenance: 0.0,
             margin: 0.into(),
@@ -816,13 +821,19 @@ impl Config {
         self
     }
 
-    /// 挂单和吃单的手续费比例。
-    pub fn fee(mut self, value: f64) -> Self {
-        self.fee = value;
+    /// 挂单的手续费率。
+    pub fn open_fee(mut self, value: f64) -> Self {
+        self.open_fee = value;
         self
     }
 
-    /// 滑点比例。
+    /// 吃单的手续费率。
+    pub fn close_fee(mut self, value: f64) -> Self {
+        self.close_fee = value;
+        self
+    }
+
+    /// 滑点率。
     pub fn deviation(mut self, value: f64) -> Self {
         self.deviation = value;
         self
@@ -834,7 +845,12 @@ impl Config {
         self
     }
 
-    /// 每次开单投入的保证金。
+    // TODO: 如何实现追加保证金？？？？？？？？？？？？？
+    // TODO: 针对 order 添加一个最小价值？？？
+    /// 每次开仓投入的保证金。
+    ///
+    /// [`Unit::Quantity`] 表示固定保证金，仓位价值 = 固定保证金 * 杠杆。
+    /// [`Unit::Proportion`] 表示策略开仓价值的比例，仓位价值 = 策略开仓价值 * 比例。
     pub fn margin<T>(mut self, value: T) -> Self
     where
         T: Into<Unit>,
