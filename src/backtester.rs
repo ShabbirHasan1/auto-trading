@@ -226,13 +226,13 @@ impl MatchmakingEngine {
     /// 插入产品。
     ///
     /// * `product` 交易产品。
-    /// * `min_unit` 面值。
-    pub fn product<S>(&mut self, product: S, min_unit: f64)
+    /// * `unit` 面值，1 张 = 价格 * 面值。
+    pub fn product<S>(&mut self, product: S, unit: f64)
     where
         S: AsRef<str>,
     {
         let product = product.as_ref();
-        self.product.insert(product.to_string(), (min_unit, 0, 0.0));
+        self.product.insert(product.to_string(), (unit, 0, 0.0));
     }
 
     /// 准备。
@@ -255,7 +255,6 @@ impl MatchmakingEngine {
     }
 
     /// 下单。
-    ///
     /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
     /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
     /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
@@ -267,7 +266,7 @@ impl MatchmakingEngine {
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `quantity` 委托数量，开仓 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，平仓 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
     /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
     /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
@@ -308,13 +307,11 @@ impl MatchmakingEngine {
                 } else {
                     match self.config.margin {
                         Unit::Quantity(v) => {
-                            (v * self.config.lever as f64 / min_unit).floor() * min_unit
-                        }
-                        Unit::Proportion(v) => {
-                            (v * self.config.initial_margin * self.config.lever as f64 / min_unit)
+                            ((v - self.config.quantity) * self.config.lever as f64 / min_unit)
                                 .floor()
                                 * min_unit
                         }
+                        Unit::Proportion(_) => 0.0,
                     }
                 }
             } else {
@@ -357,6 +354,18 @@ impl MatchmakingEngine {
                     self.balance,
                     margin,
                     fee
+                );
+            }
+
+            let temp = self.position.iter().map(|v| v.0.margin).sum::<f64>() + margin;
+
+            // 检查最大投入的保证金数量
+            if self.config.max_margin != 0.0 && temp > self.config.max_margin {
+                anyhow::bail!(
+                    "product {}: position margin > max margin: {} > {}",
+                    product,
+                    temp,
+                    self.config.max_margin,
                 );
             }
 

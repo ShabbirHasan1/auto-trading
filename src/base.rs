@@ -561,7 +561,7 @@ pub struct Context<'a> {
     /// 时间级别。
     pub level: Level,
 
-    /// 最小下单数量。
+    /// 面值，1 张 = 价格 * 面值。
     pub unit: f64,
 
     /// K 线的时间。
@@ -622,7 +622,7 @@ impl<'a> Context<'a> {
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用 [`Config::initial_margin`] 的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
     /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
     /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
@@ -773,8 +773,9 @@ pub struct Config {
     pub close_fee: f64,
     pub deviation: f64,
     pub maintenance: f64,
+    pub quantity: f64,
+    pub max_margin: f64,
     pub margin: Unit,
-    pub max_margin: Unit,
     pub stop_profit: Unit,
     pub stop_loss: Unit,
 }
@@ -790,6 +791,7 @@ impl Config {
             close_fee: 0.0,
             deviation: 0.0,
             maintenance: 0.0,
+            quantity: 0.0,
             margin: 0.into(),
             max_margin: 0.into(),
             stop_profit: 0.into(),
@@ -809,7 +811,10 @@ impl Config {
         self
     }
 
-    /// 仓位模式，true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位，false 表示买卖模式，一个合约仅可持有一个方向的仓位。
+    /// 仓位模式。
+    ///
+    /// true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位。
+    /// false 表示买卖模式，一个合约仅可持有一个方向的仓位。
     pub fn position_mode(mut self, value: bool) -> Self {
         self.position_mode = value;
         self
@@ -845,26 +850,30 @@ impl Config {
         self
     }
 
-    // TODO: 如何实现追加保证金？？？？？？？？？？？？？
-    // TODO: 针对 order 添加一个最小价值？？？
+    /// 每次开仓的仓位价值占用的保证金数量，剩余的保证金当作追加保证金。
+    ///
+    /// [`Unit::Quantity`] 表示占用保证金，仓位价值 = ([`Config::margin`] - [`Config::quantity`]) * 杠杆。
+    /// [`Unit::Proportion`] 表示占用保证金的比例，仓位价值 = 策略开仓价值 * ([`Config::margin`] - [`Config::quantity`])
+    pub fn quantity(mut self, value: f64) -> Self {
+        self.quantity = value;
+        self
+    }
+
+    /// 最大投入的保证金数量，超过后将开单失败。
+    pub fn max_margin(mut self, value: f64) -> Self {
+        self.max_margin = value;
+        self
+    }
+
     /// 每次开仓投入的保证金。
     ///
-    /// [`Unit::Quantity`] 表示固定保证金，仓位价值 = 固定保证金 * 杠杆。
-    /// [`Unit::Proportion`] 表示策略开仓价值的比例，仓位价值 = 策略开仓价值 * 比例。
+    /// [`Unit::Quantity`] 表示固定保证金，仓位价值 = ([`Config::margin`] - [`Config::quantity`]) * 杠杆。
+    /// [`Unit::Proportion`] 表示策略开仓价值的比例，仓位价值 = 策略开仓价值 * ([`Config::margin`] - [`Config::quantity`])。
     pub fn margin<T>(mut self, value: T) -> Self
     where
         T: Into<Unit>,
     {
         self.margin = value.into();
-        self
-    }
-
-    /// 最大投入的保证金数量，超过后将开单失败。
-    pub fn max_margin<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
-        self.max_margin = value.into();
         self
     }
 

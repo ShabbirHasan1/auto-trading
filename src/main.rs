@@ -10,7 +10,7 @@ async fn main() {
 
         if cci20 <= -100.0 && flag {
             // let result = cx.order(Side::BuyLong, 0.0);
-            let result = cx.order_condition(Side::BuyLong, 0.0, cx.close[0], 0, 0, 0, 0);
+            let result = cx.order(Side::BuyLong, 0.0);
             println!(
                 "做多 {} {} {:?}",
                 time_to_string(cx.time),
@@ -51,6 +51,7 @@ async fn main() {
         .close_fee(0.0005)
         .maintenance(0.004)
         .lever(100)
+        .quantity(20.0)
         .margin(40)
         .isolated(true);
 
