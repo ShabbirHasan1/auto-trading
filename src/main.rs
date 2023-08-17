@@ -3,13 +3,11 @@ use auto_trading::*;
 #[tokio::main]
 async fn main() {
     let mut flag = true;
-    let mut x = true;
 
     let strategy = |cx: &mut Context| {
         let cci20 = cci(cx.close, 20);
 
         if cci20 <= -100.0 && flag {
-            // let result = cx.order(Side::BuyLong, 0.0);
             let result = cx.order(Side::BuyLong, 0.0);
             println!(
                 "做多 {} {} {:?}",
@@ -49,10 +47,9 @@ async fn main() {
         .initial_margin(1000.0)
         .open_fee(0.0002)
         .close_fee(0.0005)
-        .maintenance(0.004)
+        .maintenance(0.003)
         .lever(100)
-        .quantity(20.0)
-        .margin(40)
+        .margin(30)
         .isolated(true);
 
     let bt = Backtester::new(bourse, config);
@@ -64,7 +61,7 @@ async fn main() {
         .unwrap();
 
     // println!("{:#?}", result);
-    // std::fs::write("./list.txt", format!("{:#?}", result));
+    std::fs::write("./list.txt", format!("{:#?}", result));
 
     println!("{}", result.iter().map(|v| v.profit).sum::<f64>())
 }

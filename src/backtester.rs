@@ -54,6 +54,9 @@ where
         // TODO: 如何实现交割合约和期权合约？
         // TODO: 要不要支持移动止盈止损？
         // TODO: 触发限价委托，不占用保证金，但是官方没有这个接口？？？？？？
+        // TODO: 考虑删除 neg
+        // TODO: position_mode 未经测试
+        // TODO: 最大持仓量和 fee 计算冗余
 
         let product = product.as_ref();
 
@@ -297,35 +300,45 @@ impl MatchmakingEngine {
         if side == Side::BuyLong || side == Side::SellShort {
             let price = if price == 0.0 { close_price } else { price };
 
-            // 最小下单数量
+            // 最小下单价值
             let min_unit = unit * price;
 
-            // 转换百分比
-            let quantity = if quantity == 0.0 {
-                if self.config.margin == 0.0 {
-                    0.0
+            // 策略仓位价值
+            let strategy_quantity =
+                quantity.to_quantity(self.config.initial_margin * self.config.lever as f64);
+
+            // 仓位价值
+            let quantity = if self.config.margin == 0.0 {
+                if self.config.quantity == 0.0 {
+                    (strategy_quantity / min_unit).floor() * min_unit
+                } else {
+                    anyhow::bail!(
+                        "product {}: config margin cannot be zero, because config quantity is not zero",
+                        product
+                    );
+                }
+            } else {
+                if self.config.quantity == 0.0 {
+                    if strategy_quantity == 0.0 || strategy_quantity > min_unit {
+                        min_unit
+                    } else {
+                        strategy_quantity
+                    }
                 } else {
                     match self.config.margin {
                         Unit::Quantity(v) => {
-                            ((v - self.config.quantity) * self.config.lever as f64 / min_unit)
-                                .floor()
+                            (v * self.config.quantity * self.config.lever as f64 / min_unit).floor()
                                 * min_unit
                         }
-                        Unit::Proportion(_) => 0.0,
-                    }
-                }
-            } else {
-                match quantity {
-                    Unit::Quantity(v) => (v / min_unit).floor() * min_unit,
-                    Unit::Proportion(v) => {
-                        (v * self.config.initial_margin * self.config.lever as f64 / min_unit)
-                            .floor()
-                            * min_unit
+                        Unit::Proportion(v) => {
+                            (strategy_quantity / (v - self.config.quantity) / min_unit).floor()
+                                * min_unit
+                        }
                     }
                 }
             };
 
-            // 开仓数量不能小于最小下单数量
+            // 开仓价值不能小于最小下单价值
             if quantity < min_unit {
                 anyhow::bail!(
                     "product {}: open quantity < min unit: {} < {}",
@@ -340,7 +353,10 @@ impl MatchmakingEngine {
                 quantity / self.config.lever as f64
             } else {
                 // 实际投入的保证金
-                self.config.margin.to_quantity(self.config.initial_margin)
+                match self.config.margin {
+                    Unit::Quantity(v) => v,
+                    Unit::Proportion(v) => strategy_quantity * v,
+                }
             };
 
             // 手续费
@@ -372,14 +388,14 @@ impl MatchmakingEngine {
             // 检查止盈止损参数
             if stop_profit_condition == 0.0 && stop_profit != 0.0 {
                 anyhow::bail!(
-                    "product {}: the stop profit must be zero, because the stop profit condition is zero",
+                    "product {}: stop profit must be zero, because stop profit condition is zero",
                     product
                 );
             }
 
             if stop_loss_condition == 0.0 && stop_loss != 0.0 {
                 anyhow::bail!(
-                    "product {}: the stop loss must be zero, because the stop loss condition is zero",
+                    "product {}: stop loss must be zero, because stop loss condition is zero",
                     product
                 )
             }
@@ -478,7 +494,7 @@ impl MatchmakingEngine {
         {
             let price = if price == 0.0 { close_price } else { price };
 
-            // 最小下单数量
+            // 最小下单价值
             let min_unit = unit * v.close_price;
 
             // 转换百分比
@@ -488,7 +504,7 @@ impl MatchmakingEngine {
                 (quantity.to_quantity(v.quantity) / min_unit).floor() as f64
             };
 
-            // 平仓数量不能小于最小下单数量
+            // 平仓数量不能小于最小下单价值
             if quantity < min_unit {
                 anyhow::bail!(
                     "product {}: close quantity < min unit: {} < {}",
@@ -565,8 +581,11 @@ impl MatchmakingEngine {
                         position.fee = position.list.iter().map(|v| v.fee).sum();
 
                         let mut max_quantity = 0.0;
+
                         let mut sum_quantity = 0.0;
+
                         let mut max_margin = 0.0;
+
                         let mut sum_margin = 0.0;
 
                         position
@@ -603,14 +622,23 @@ impl MatchmakingEngine {
                                 let position = &self.position[i].0;
                                 if position.product == product {
                                     let mut position = self.position.swap_remove(i).0;
+
                                     position.profit = (position.liquidation_price
                                         - position.open_price)
                                         * position.quantity
                                         / position.open_price;
+
                                     position.profit_ratio = position.profit / position.margin;
 
-                                    let mut max = 0.0;
-                                    let mut sum = 0.0;
+                                    position.fee = position.list.iter().map(|v| v.fee).sum();
+
+                                    let mut max_quantity = 0.0;
+
+                                    let mut sum_quantity = 0.0;
+
+                                    let mut max_margin = 0.0;
+
+                                    let mut sum_margin = 0.0;
 
                                     position
                                         .list
@@ -619,19 +647,26 @@ impl MatchmakingEngine {
                                             v.side == Side::BuyLong || v.side == Side::SellShort
                                         })
                                         .for_each(|v| {
-                                            sum += v.quantity * v.side.factor();
-                                            if sum > max {
-                                                max = sum;
+                                            sum_quantity += v.quantity * v.side.factor();
+                                            if sum_quantity > max_quantity {
+                                                max_quantity = sum_quantity;
+                                            }
+                                            sum_margin += v.margin * v.side.factor();
+                                            if sum_margin > max_margin {
+                                                max_margin = sum_margin;
                                             }
                                         });
 
                                     // 最大持仓量
-                                    position.quantity = max;
+                                    position.quantity = max_quantity.abs();
 
                                     // 最大保证金
-                                    position.margin = max / self.config.lever as f64;
+                                    position.margin = max_margin.abs();
+
                                     position.close_price = position.liquidation_price;
+
                                     position.close_time = time;
+
                                     self.history.push(position);
                                 }
                             }
@@ -716,7 +751,6 @@ impl MatchmakingEngine {
                             // 做多强平价格 = 入场价格 × (1 - 初始保证金率 + 维持保证金率) - (追加保证金 / 仓位数量) + 吃单手续费
                             // 做空强平价格 = 入场价格 × (1 + 初始保证金率 - 维持保证金率) + (追加保证金 / 仓位数量) - 吃单手续费
                             // 初始保证金率 = 1 / 杠杆
-                            // 维持保证金率 = 0.005
                             // 追加保证金 = 账户余额 - 初始化保证金
                             // 初始保证金 = 入场价格 / 杠杆
                             let imr = 1.0 / self.config.lever as f64;
@@ -917,15 +951,10 @@ impl MatchmakingEngine {
                                     * delegate.quantity
                                     / position.open_price;
 
+                                // 只修改会影响下单的属性，其他属性在完成平仓的时候计算。
                                 position.quantity -= delegate.quantity;
 
                                 position.margin -= margin;
-
-                                position.profit += profit;
-
-                                position.profit_ratio += profit / margin;
-
-                                position.fee = position.list.iter().map(|v| v.fee).sum();
 
                                 self.balance += profit;
 
@@ -958,26 +987,46 @@ impl MatchmakingEngine {
 
                     if position.quantity == 0.0 {
                         let mut position = self.position.swap_remove(i).0;
-                        let mut max = 0.0;
-                        let mut sum = 0.0;
+
+                        position.profit = position.list.iter().map(|v| v.profit).sum();
+
+                        position.profit_ratio = position.list.iter().map(|v| v.profit_ratio).sum();
+
+                        position.fee = position.list.iter().map(|v| v.fee).sum();
+
+                        let mut max_quantity = 0.0;
+
+                        let mut sum_quantity = 0.0;
+
+                        let mut max_margin = 0.0;
+
+                        let mut sum_margin = 0.0;
+
                         position
                             .list
                             .iter()
                             .filter(|v| v.side == Side::BuyLong || v.side == Side::SellShort)
                             .for_each(|v| {
-                                sum += v.quantity * v.side.factor();
-                                if sum > max {
-                                    max = sum;
+                                sum_quantity += v.quantity * v.side.factor();
+                                if sum_quantity > max_quantity {
+                                    max_quantity = sum_quantity;
+                                }
+                                sum_margin += v.margin * v.side.factor();
+                                if sum_margin > max_margin {
+                                    max_margin = sum_margin;
                                 }
                             });
 
                         // 最大持仓量
-                        position.quantity = max;
+                        position.quantity = max_quantity.abs();
 
                         // 最大保证金
-                        position.margin = max / self.config.lever as f64;
+                        position.margin = max_margin.abs();
+
                         position.close_price = price;
+
                         position.close_time = time;
+
                         self.history.push(position);
                     }
                 }
