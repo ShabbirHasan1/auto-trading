@@ -10,7 +10,8 @@ async fn main() {
         if cci20 <= -100.0 && flag {
             let result = cx.order(Side::BuyLong, 0.0);
             println!(
-                "做多 {} {} {:?}",
+                "做多 {} {} {} {:?}",
+                cx.time,
                 time_to_string(cx.time),
                 cx.close[0],
                 result
@@ -18,16 +19,18 @@ async fn main() {
             flag = false;
         }
 
-        if cci20 >= 100.0 && !flag {
-            let result = cx.order(Side::BuySell, 0.0);
-            println!(
-                "平多 {} {} {:?}",
-                time_to_string(cx.time),
-                cx.close[0],
-                result
-            );
-            flag = true;
-        }
+        // if cci20 >= 100.0 && !flag {
+        //     let result = cx.order(Side::BuySell, 0.0);
+        //     println!(
+        //         "平多 {} {} {} {:?}",
+        //         cx.time,
+        //         time_to_string(cx.time),
+        //         cx.close[0],
+        //         result
+        //     );
+
+        //     flag = true;
+        // }
     };
 
     let mut bourse = LocalBourse::new();
@@ -49,7 +52,7 @@ async fn main() {
         .close_fee(0.0005)
         .maintenance(0.003)
         .lever(100)
-        .margin(30)
+        .margin(Unit::Proportion(1.0))
         .isolated(true);
 
     let bt = Backtester::new(bourse, config);
@@ -60,8 +63,8 @@ async fn main() {
         .await
         .unwrap();
 
-    // println!("{:#?}", result);
-    std::fs::write("./list.txt", format!("{:#?}", result));
+    println!("{:#?}", result);
+    // std::fs::write("./list.txt", format!("{:#?}", result));
 
     println!("{}", result.iter().map(|v| v.profit).sum::<f64>())
 }

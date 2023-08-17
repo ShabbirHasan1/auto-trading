@@ -304,7 +304,7 @@ impl MatchmakingEngine {
             let min_unit = unit * price;
 
             // 策略仓位价值
-            let strategy_quantity =
+            let mut strategy_quantity =
                 quantity.to_quantity(self.config.initial_margin * self.config.lever as f64);
 
             // 仓位价值
@@ -320,6 +320,7 @@ impl MatchmakingEngine {
             } else {
                 if self.config.quantity == 0.0 {
                     if strategy_quantity == 0.0 || strategy_quantity > min_unit {
+                        strategy_quantity = min_unit;
                         min_unit
                     } else {
                         strategy_quantity
@@ -355,7 +356,7 @@ impl MatchmakingEngine {
                 // 实际投入的保证金
                 match self.config.margin {
                     Unit::Quantity(v) => v,
-                    Unit::Proportion(v) => strategy_quantity * v,
+                    Unit::Proportion(v) => strategy_quantity * v / self.config.lever as f64,
                 }
             };
 
@@ -572,9 +573,7 @@ impl MatchmakingEngine {
                     if self.config.isolated {
                         let mut position = self.position.swap_remove(i).0;
 
-                        position.profit = (position.liquidation_price - position.open_price)
-                            * position.quantity
-                            / position.open_price;
+                        position.profit = -position.margin;
 
                         position.profit_ratio = position.profit / position.margin;
 
@@ -613,6 +612,17 @@ impl MatchmakingEngine {
 
                         position.close_time = time;
 
+                        position.list.push(SubPosition {
+                            side: position.side.neg(),
+                            price: position.liquidation_price,
+                            quantity: position.quantity,
+                            margin: position.margin,
+                            fee: 0.0,
+                            profit: position.profit,
+                            profit_ratio: position.profit_ratio,
+                            time: position.close_time,
+                        });
+
                         self.history.push(position);
                     } else {
                         for (product, (_, time, _)) in
@@ -623,10 +633,7 @@ impl MatchmakingEngine {
                                 if position.product == product {
                                     let mut position = self.position.swap_remove(i).0;
 
-                                    position.profit = (position.liquidation_price
-                                        - position.open_price)
-                                        * position.quantity
-                                        / position.open_price;
+                                    position.profit = -position.margin;
 
                                     position.profit_ratio = position.profit / position.margin;
 
@@ -666,6 +673,17 @@ impl MatchmakingEngine {
                                     position.close_price = position.liquidation_price;
 
                                     position.close_time = time;
+
+                                    position.list.push(SubPosition {
+                                        side: position.side.neg(),
+                                        price: position.liquidation_price,
+                                        quantity: position.quantity,
+                                        margin: position.margin,
+                                        fee: 0.0,
+                                        profit: position.profit,
+                                        profit_ratio: position.profit_ratio,
+                                        time: position.close_time,
+                                    });
 
                                     self.history.push(position);
                                 }
@@ -943,7 +961,8 @@ impl MatchmakingEngine {
                         {
                             if delegate.price == 0.0 {
                                 // 限价触发，市价委托
-                                let margin = delegate.quantity / self.config.lever as f64;
+                                let margin =
+                                    position.margin * delegate.quantity / position.quantity;
 
                                 let fee = delegate.quantity * self.config.close_fee;
 
@@ -959,6 +978,8 @@ impl MatchmakingEngine {
                                 self.balance += profit;
 
                                 self.balance += margin;
+
+                                self.balance -= fee;
 
                                 position.list.push(SubPosition {
                                     side: delegate.side,
