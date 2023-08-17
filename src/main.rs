@@ -3,11 +3,17 @@ use auto_trading::*;
 #[tokio::main]
 async fn main() {
     let mut flag = true;
+    let mut acci = 0.0;
 
     let strategy = |cx: &mut Context| {
-        let cci20 = cci(cx.close, 20);
+        let a = cci(&cx.close[1..], 20);
+        let b = cci(cx.close, 20);
 
-        if cci20 <= -100.0 && flag {
+        if acci == 0.0 && a <= -100.0 && a <= b {
+            acci = sma_map(cx.close, 5, |v| cci(v, 20));
+        }
+
+        if acci != 0.0 && cci(cx.close, 20) >= acci && flag {
             let result = cx.order(Side::BuyLong, 0.0);
             println!(
                 "做多 {} {} {} {:?}",
@@ -16,21 +22,22 @@ async fn main() {
                 cx.close[0],
                 result
             );
+
             flag = false;
         }
 
-        // if cci20 >= 100.0 && !flag {
-        //     let result = cx.order(Side::BuySell, 0.0);
-        //     println!(
-        //         "平多 {} {} {} {:?}",
-        //         cx.time,
-        //         time_to_string(cx.time),
-        //         cx.close[0],
-        //         result
-        //     );
-
-        //     flag = true;
-        // }
+        if cci(cx.close, 20) >= 100.0 && !flag {
+            let result = cx.order(Side::BuySell, 0.0);
+            println!(
+                "平多 {} {} {} {:?}",
+                cx.time,
+                time_to_string(cx.time),
+                cx.close[0],
+                result
+            );
+            flag = true;
+            acci = 0.0;
+        }
     };
 
     let mut bourse = LocalBourse::new();
@@ -50,9 +57,9 @@ async fn main() {
         .initial_margin(1000.0)
         .open_fee(0.0002)
         .close_fee(0.0005)
-        .maintenance(0.003)
+        .maintenance(0.004)
         .lever(100)
-        .margin(Unit::Proportion(1.0))
+        .margin(Unit::Proportion(10.0))
         .isolated(true);
 
     let bt = Backtester::new(bourse, config);
@@ -63,7 +70,7 @@ async fn main() {
         .await
         .unwrap();
 
-    println!("{:#?}", result);
+    // println!("{:#?}", result);
     // std::fs::write("./list.txt", format!("{:#?}", result));
 
     println!("{}", result.iter().map(|v| v.profit).sum::<f64>())

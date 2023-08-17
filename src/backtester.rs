@@ -307,6 +307,10 @@ impl MatchmakingEngine {
             let mut strategy_quantity =
                 quantity.to_quantity(self.config.initial_margin * self.config.lever as f64);
 
+            if strategy_quantity == 0.0 {
+                strategy_quantity = min_unit;
+            }
+
             // 仓位价值
             let quantity = if self.config.margin == 0.0 {
                 if self.config.quantity == 0.0 {
@@ -319,12 +323,7 @@ impl MatchmakingEngine {
                 }
             } else {
                 if self.config.quantity == 0.0 {
-                    if strategy_quantity == 0.0 || strategy_quantity > min_unit {
-                        strategy_quantity = min_unit;
-                        min_unit
-                    } else {
-                        strategy_quantity
-                    }
+                    (strategy_quantity / min_unit).floor() * min_unit
                 } else {
                     match self.config.margin {
                         Unit::Quantity(v) => {
@@ -332,7 +331,7 @@ impl MatchmakingEngine {
                                 * min_unit
                         }
                         Unit::Proportion(v) => {
-                            (strategy_quantity / (v - self.config.quantity) / min_unit).floor()
+                            (strategy_quantity * (v - self.config.quantity) / min_unit).floor()
                                 * min_unit
                         }
                     }
@@ -405,13 +404,21 @@ impl MatchmakingEngine {
             let stop_profit_condition = if stop_profit_condition == 0.0 {
                 0.0
             } else {
-                price + stop_profit_condition.to_quantity(price) * side.factor()
+                match stop_profit_condition {
+                    Unit::Quantity(v) => v,
+                    Unit::Proportion(_) => {
+                        price + stop_profit_condition.to_quantity(price) * side.factor()
+                    }
+                }
             };
 
             let stop_loss_condition = if stop_loss_condition == 0.0 {
                 0.0
             } else {
-                price + stop_loss_condition.to_quantity(price) * side.neg().factor()
+                match stop_loss_condition {
+                    Unit::Quantity(v) => v,
+                    Unit::Proportion(v) => price + price * v * side.neg().factor(),
+                }
             };
 
             if side == Side::BuyLong {
