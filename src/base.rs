@@ -225,114 +225,8 @@ impl std::ops::Index<std::ops::RangeToInclusive<usize>> for Source {
     }
 }
 
-/// 变量值。
-#[derive(Debug, Clone, PartialEq)]
-pub enum Value {
-    Null,
-    Number(f64),
-    String(String),
-    Array(Vec<Value>),
-}
-
-impl From<i8> for Value {
-    fn from(value: i8) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<u8> for Value {
-    fn from(value: u8) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<i16> for Value {
-    fn from(value: i16) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<u16> for Value {
-    fn from(value: u16) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<i32> for Value {
-    fn from(value: i32) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<u32> for Value {
-    fn from(value: u32) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<i64> for Value {
-    fn from(value: i64) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<u64> for Value {
-    fn from(value: u64) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<f32> for Value {
-    fn from(value: f32) -> Self {
-        Value::Number(value as f64)
-    }
-}
-
-impl From<f64> for Value {
-    fn from(value: f64) -> Self {
-        Value::Number(value)
-    }
-}
-
-impl From<&str> for Value {
-    fn from(value: &str) -> Self {
-        Value::String(value.to_string())
-    }
-}
-
-impl From<String> for Value {
-    fn from(value: String) -> Self {
-        Value::String(value)
-    }
-}
-
-impl From<Vec<Value>> for Value {
-    fn from(value: Vec<Value>) -> Self {
-        Value::Array(value)
-    }
-}
-
-impl std::fmt::Display for Value {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Value::Null => write!(f, "null"),
-            Value::Number(v) => write!(f, "{}", v),
-            Value::String(v) => write!(f, "{}", v),
-            Value::Array(v) => {
-                write!(
-                    f,
-                    "[{}]",
-                    v.iter()
-                        .map(|v| format!("{}", v))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-        }
-    }
-}
-
 /// 时间范围。
+#[derive(Debug, Clone, Copy)]
 pub struct TimeRange {
     pub start: u64,
     pub end: u64,
@@ -583,7 +477,7 @@ pub struct Context<'a> {
 
     pub(crate) cancel: &'a dyn Fn(u64),
 
-    pub(crate) new_context: &'a dyn Fn(&str, Level) -> &Context,
+    pub(crate) new_context: &'a dyn Fn(&str, Level) -> &'a Context,
 }
 
 impl<'a> Context<'a> {

@@ -66,14 +66,14 @@ async fn main() {
 
     // 1659539044000..1691075044000
     let result = bt
-        .start(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Minute1, 0)
+        .start(strategy, "BTC-USDT-SWAP", Level::Hour4, 0)
         .await
         .unwrap();
 
     // println!("{:#?}", result);
     // std::fs::write("./list.txt", format!("{:#?}", result));
 
-    println!("{}", result.iter().map(|v| v.profit).sum::<f64>())
+    println!("{}", result.iter().map(|v| v.profit).sum::<f64>());
 }
 
 #[tokio::test]

@@ -33,17 +33,15 @@ where
     ///
     /// * `strategy` 策略。
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `strategy_level` 策略的时间级别。
-    /// * `backtester_level` 回测器的精度。
-    /// * `time` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
+    /// * `level` 时间级别。
+    /// * `range` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
     /// * `return` 回测结果，如果 [`Config`] 的某些参数未设置，且策略依赖这些参数，将返回错误。
     pub async fn start<F, S, I>(
         &self,
         mut strategy: F,
         product: S,
-        strategy_level: Level,
-        backtester_level: Level,
-        time: I,
+        level: Level,
+        range: I,
     ) -> anyhow::Result<Vec<Position>>
     where
         F: FnMut(&mut Context),
@@ -60,24 +58,22 @@ where
 
         let product = product.as_ref();
 
-        let k = self
-            .get_k_range(product, strategy_level, time.into())
-            .await?;
+        let range = range.into();
 
-        // let sk = self
-        //     .get_k_range(product, backtester_level, time.into())
-        //     .await?;
+        let k = self.get_k_range(product, level, range).await?;
 
         let time = k.iter().map(|v| v.time).collect::<Vec<_>>();
+
         let open = k.iter().map(|v| v.open).collect::<Vec<_>>();
+
         let high = k.iter().map(|v| v.high).collect::<Vec<_>>();
+
         let low = k.iter().map(|v| v.low).collect::<Vec<_>>();
+
         let close = k.iter().map(|v| v.close).collect::<Vec<_>>();
 
-        // 面值
         let unit = self.bourse.get_unit(product).await?;
 
-        // 撮合引擎
         let me = std::cell::RefCell::new(MatchmakingEngine::new(self.config));
 
         me.borrow_mut().product(product, unit);
@@ -89,41 +85,40 @@ where
             let low = Source::new(&low[index..]);
             let close = Source::new(&close[index..]);
 
-            me.borrow_mut().ready(product, time, close[0]);
-
-            let order = |side,
-                         price,
-                         quantity,
-                         stop_profit_condition,
-                         stop_loss_condition,
-                         stop_profit,
-                         stop_loss| {
-                me.borrow_mut().order(
-                    product,
-                    side,
-                    price,
-                    quantity,
-                    stop_profit_condition,
-                    stop_loss_condition,
-                    stop_profit,
-                    stop_loss,
-                )
-            };
-
-            let cancel = |value: u64| me.borrow_mut().cancel(value);
+            me.borrow_mut()
+                .ready(product, time, high[0], low[0], close[0]);
 
             let mut cx = Context {
                 product,
-                level: strategy_level,
+                level,
                 unit,
                 time,
                 open,
                 high,
                 low,
                 close,
-                order: &order,
-                cancel: &cancel,
-                new_context: &|a, b| todo!(),
+                order: &|side,
+                         price,
+                         quantity,
+                         stop_profit_condition,
+                         stop_loss_condition,
+                         stop_profit,
+                         stop_loss| {
+                    me.borrow_mut().order(
+                        product,
+                        side,
+                        price,
+                        quantity,
+                        stop_profit_condition,
+                        stop_loss_condition,
+                        stop_profit,
+                        stop_loss,
+                    )
+                },
+                cancel: &|value| me.borrow_mut().cancel(value),
+                new_context: &|product: &str, level: Level| {
+                    todo!("貌似无解，策略闭包要不要改成异步的？")
+                },
             };
 
             strategy(&mut cx);
@@ -138,11 +133,11 @@ where
         &self,
         product: &str,
         level: Level,
-        time: TimeRange,
+        range: TimeRange,
     ) -> anyhow::Result<Vec<K>> {
         let mut result = Vec::new();
 
-        if time.start == 0 && time.end == 0 {
+        if range.start == 0 && range.end == 0 {
             let mut time = 0;
 
             loop {
@@ -159,7 +154,7 @@ where
             return Ok(result);
         }
 
-        let mut end = time.end;
+        let mut end = range.end;
 
         if end == u64::MAX - 1 {
             end = std::time::SystemTime::now()
@@ -172,9 +167,9 @@ where
             let v = self.bourse.get_k(product, level, end).await?;
 
             if let Some(k) = v.last() {
-                if k.time < time.start {
+                if k.time < range.start {
                     for i in v {
-                        if i.time >= time.start {
+                        if i.time >= range.start {
                             result.push(i);
                         }
                     }
@@ -201,8 +196,8 @@ pub struct MatchmakingEngine {
     /// 交易配置。
     config: Config,
 
-    /// 产品，面值，时间，价格
-    product: std::collections::HashMap<String, (f64, u64, f64)>,
+    /// 产品，面值，时间，最高价，最低价，收盘价
+    product: std::collections::HashMap<String, (f64, u64, f64, f64, f64)>,
 
     /// 仓位，开仓委托。
     delegate: std::collections::HashMap<u64, Delegate>,
@@ -235,16 +230,20 @@ impl MatchmakingEngine {
         S: AsRef<str>,
     {
         let product = product.as_ref();
-        self.product.insert(product.to_string(), (unit, 0, 0.0));
+        self.product
+            .insert(product.to_string(), (unit, 0, 0.0, 0.0, 0.0));
     }
 
     /// 准备。
     /// 在调用委托之前，需要准备。
     /// 在准备之前，需要插入产品。
     ///
+    /// * `product` 交易产品。
     /// * `time` 时间。
-    /// * `value` 交易产品，价格。
-    pub fn ready<S>(&mut self, product: S, time: u64, price: f64)
+    /// * `high` 最高价。
+    /// * `low` 最低价。
+    /// * `close` 收盘价。
+    pub fn ready<S>(&mut self, product: S, time: u64, high: f64, low: f64, close: f64)
     where
         S: AsRef<str>,
     {
@@ -254,7 +253,9 @@ impl MatchmakingEngine {
             .get_mut(product)
             .expect(&format!("no product: {}", product));
         temp.1 = time;
-        temp.2 = price;
+        temp.2 = high;
+        temp.3 = low;
+        temp.4 = close;
     }
 
     /// 下单。
@@ -266,10 +267,10 @@ impl MatchmakingEngine {
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
     /// 止盈止损委托为只减仓，平仓数量为 `quantity`，如果 [`Config`] 进行了平仓操作，那么止盈止损委托也会被撤销。
     ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `product` 交易产品。
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config`] 的设置，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示最小下单数量，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
     /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
     /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
     /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
@@ -291,7 +292,7 @@ impl MatchmakingEngine {
     {
         let product = product.as_ref();
 
-        let (unit, _, close_price) = self
+        let (unit, _, _, _, close_price) = self
             .product
             .get(product)
             .ok_or(anyhow::anyhow!("no product: {}", product))?
@@ -568,14 +569,15 @@ impl MatchmakingEngine {
     /// 更新。
     pub fn update(&mut self) {
         // 处理强平
-        'a: for (product, (_, time, price)) in
+        'a: for (product, (_, time, high_price, low_price, _)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             for i in (0..self.position.len()).rev() {
                 let position = &self.position[i].0;
                 if position.product == product
-                    && (position.side == Side::BuyLong && price <= position.liquidation_price
-                        || position.side == Side::SellShort && price >= position.liquidation_price)
+                    && (position.side == Side::BuyLong && low_price <= position.liquidation_price
+                        || position.side == Side::SellShort
+                            && high_price >= position.liquidation_price)
                 {
                     if self.config.isolated {
                         let mut position = self.position.swap_remove(i).0;
@@ -632,7 +634,7 @@ impl MatchmakingEngine {
 
                         self.history.push(position);
                     } else {
-                        for (product, (_, time, _)) in
+                        for (product, (_, time, _, _, _)) in
                             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
                         {
                             for i in (0..self.position.len()).rev() {
@@ -703,7 +705,7 @@ impl MatchmakingEngine {
         }
 
         // 处理委托
-        for (product, (_, time, price)) in
+        for (product, (_, time, _, _, close_price)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             self.delegate.retain(|_, delegate| {
@@ -712,8 +714,8 @@ impl MatchmakingEngine {
                 }
 
                 if delegate.side == Side::BuyLong || delegate.side == Side::SellShort {
-                    if delegate.side == Side::BuyLong && price <= delegate.price
-                        || delegate.side == Side::SellShort && price >= delegate.price
+                    if delegate.side == Side::BuyLong && close_price <= delegate.price
+                        || delegate.side == Side::SellShort && close_price >= delegate.price
                     {
                         if delegate.isolated {
                             // 查找现有仓位
@@ -955,7 +957,7 @@ impl MatchmakingEngine {
         }
 
         // 处理止盈止损
-        for (product, (_, time, price)) in
+        for (product, (_, time, _, _, close_price)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             for i in (0..self.position.len()).rev() {
@@ -963,8 +965,8 @@ impl MatchmakingEngine {
                 if position.product == product {
                     for i in (0..sub_delegate.len()).rev() {
                         let delegate = &sub_delegate[i];
-                        if delegate.side == Side::BuySell && price >= delegate.condition
-                            || delegate.side == Side::SellLong && price <= delegate.condition
+                        if delegate.side == Side::BuySell && close_price >= delegate.condition
+                            || delegate.side == Side::SellLong && close_price <= delegate.condition
                         {
                             if delegate.price == 0.0 {
                                 // 限价触发，市价委托
@@ -1051,7 +1053,7 @@ impl MatchmakingEngine {
                         // 最大保证金
                         position.margin = max_margin.abs();
 
-                        position.close_price = price;
+                        position.close_price = close_price;
 
                         position.close_time = time;
 
