@@ -13,3 +13,4 @@ chrono = "0.4.26"
 serde = { version = "1", features = ["derive"] }
 async-trait = "0.1.72"
 serde_json = "1"
+overload = "0.1.1"

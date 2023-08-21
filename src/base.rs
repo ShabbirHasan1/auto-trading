@@ -1,4 +1,5 @@
 use crate::*;
+use std::ops;
 
 /// K 线。
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -130,15 +131,11 @@ impl Source {
     }
 }
 
-impl PartialEq<f64> for Source {
-    fn eq(&self, other: &f64) -> bool {
-        self[0] == *other
-    }
-}
+impl std::ops::Deref for Source {
+    type Target = [f64];
 
-impl PartialOrd<f64> for Source {
-    fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
-        self[0].partial_cmp(other)
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
@@ -151,14 +148,6 @@ where
     }
 }
 
-impl std::ops::Deref for Source {
-    type Target = [f64];
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
 impl<'a> IntoIterator for &'a Source {
     type Item = &'a f64;
 
@@ -166,6 +155,12 @@ impl<'a> IntoIterator for &'a Source {
 
     fn into_iter(self) -> Self::IntoIter {
         self.inner.into_iter()
+    }
+}
+
+impl std::fmt::Display for &Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{}", self[0]))
     }
 }
 
@@ -224,6 +219,58 @@ impl std::ops::Index<std::ops::RangeToInclusive<usize>> for Source {
         self.index(index)
     }
 }
+
+impl PartialEq<i64> for &Source {
+    fn eq(&self, other: &i64) -> bool {
+        self == other
+    }
+}
+
+impl PartialEq<f64> for &Source {
+    fn eq(&self, other: &f64) -> bool {
+        self == other
+    }
+}
+
+impl PartialEq for &Source {
+    fn eq(&self, other: &Self) -> bool {
+        self[0] == other[0]
+    }
+}
+
+impl PartialOrd<i64> for &Source {
+    fn partial_cmp(&self, other: &i64) -> Option<std::cmp::Ordering> {
+        self[0].partial_cmp(&(*other as f64))
+    }
+}
+
+impl PartialOrd<f64> for &Source {
+    fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
+        self[0].partial_cmp(other)
+    }
+}
+
+impl PartialOrd for &Source {
+    fn partial_cmp(&self, other: &&Source) -> Option<std::cmp::Ordering> {
+        self[0].partial_cmp(&other[0])
+    }
+}
+
+overload::overload!((a: &Source) + (b: i64) -> f64 { a[0] + b as f64 });
+overload::overload!((a: &Source) - (b: i64) -> f64 { a[0] - b as f64 });
+overload::overload!((a: &Source) * (b: i64) -> f64 { a[0] * b as f64 });
+overload::overload!((a: &Source) / (b: i64) -> f64 { a[0] / b as f64 });
+overload::overload!((a: &Source) % (b: i64) -> f64 { a[0] % b as f64 });
+overload::overload!((a: &Source) + (b: f64) -> f64 { a[0] + b });
+overload::overload!((a: &Source) - (b: f64) -> f64 { a[0] - b });
+overload::overload!((a: &Source) * (b: f64) -> f64 { a[0] * b });
+overload::overload!((a: &Source) / (b: f64) -> f64 { a[0] / b });
+overload::overload!((a: &Source) % (b: f64) -> f64 { a[0] % b });
+overload::overload!((a: &Source) + (b: &Source) -> f64 { a[0] + b[0] });
+overload::overload!((a: &Source) - (b: &Source) -> f64 { a[0] - b[0] });
+overload::overload!((a: &Source) * (b: &Source) -> f64 { a[0] * b[0] });
+overload::overload!((a: &Source) / (b: &Source) -> f64 { a[0] / b[0] });
+overload::overload!((a: &Source) % (b: &Source) -> f64 { a[0] % b[0] });
 
 /// 时间范围。
 #[derive(Debug, Clone, Copy)]
@@ -317,8 +364,8 @@ impl Side {
         match self {
             Side::BuyLong => 1.0,
             Side::SellShort => -1.0,
-            Side::BuySell => 1.0,
-            Side::SellLong => -1.0,
+            Side::BuySell => -1.0,
+            Side::SellLong => 1.0,
         }
     }
 
@@ -583,6 +630,12 @@ impl Unit {
             Self::Quantity(v) => v,
             Self::Proportion(v) => v * value,
         }
+    }
+}
+
+impl From<&Source> for Unit {
+    fn from(value: &Source) -> Self {
+        value[0].into()
     }
 }
 

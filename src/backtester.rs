@@ -292,14 +292,14 @@ impl MatchmakingEngine {
     {
         let product = product.as_ref();
 
-        let (unit, _, _, _, close_price) = self
+        let (unit, _, _, _, close) = self
             .product
             .get(product)
             .ok_or(anyhow::anyhow!("no product: {}", product))?
             .to_owned();
 
         if side == Side::BuyLong || side == Side::SellShort {
-            let price = if price == 0.0 { close_price } else { price };
+            let price = if price == 0.0 { close } else { price };
 
             // 最小下单价值
             let min_unit = unit * price;
@@ -407,9 +407,7 @@ impl MatchmakingEngine {
             } else {
                 match stop_profit_condition {
                     Unit::Quantity(v) => v,
-                    Unit::Proportion(_) => {
-                        price + stop_profit_condition.to_quantity(price) * side.factor()
-                    }
+                    Unit::Proportion(v) => price + price * v * side.factor(),
                 }
             };
 
@@ -417,6 +415,24 @@ impl MatchmakingEngine {
                 0.0
             } else {
                 match stop_loss_condition {
+                    Unit::Quantity(v) => v,
+                    Unit::Proportion(v) => price + price * v * side.neg().factor(),
+                }
+            };
+
+            let stop_profit = if stop_profit == 0.0 {
+                0.0
+            } else {
+                match stop_profit {
+                    Unit::Quantity(v) => v,
+                    Unit::Proportion(v) => price + price * v * side.factor(),
+                }
+            };
+
+            let stop_loss = if stop_loss == 0.0 {
+                0.0
+            } else {
+                match stop_loss {
                     Unit::Quantity(v) => v,
                     Unit::Proportion(v) => price + price * v * side.neg().factor(),
                 }
@@ -487,8 +503,8 @@ impl MatchmakingEngine {
                     margin,
                     stop_profit_condition,
                     stop_loss_condition,
-                    stop_profit: price + stop_profit.to_quantity(price) * side.factor(),
-                    stop_loss: price + stop_loss.to_quantity(price) * side.neg().factor(),
+                    stop_profit,
+                    stop_loss,
                 },
             );
 
@@ -501,7 +517,7 @@ impl MatchmakingEngine {
             .find(|v| v.0.product == product)
             .map(|v| &v.0)
         {
-            let price = if price == 0.0 { close_price } else { price };
+            let price = if price == 0.0 { close } else { price };
 
             // 最小下单价值
             let min_unit = unit * v.close_price;
@@ -569,15 +585,14 @@ impl MatchmakingEngine {
     /// 更新。
     pub fn update(&mut self) {
         // 处理强平
-        'a: for (product, (_, time, high_price, low_price, _)) in
+        'a: for (product, (_, time, high, low, _)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             for i in (0..self.position.len()).rev() {
                 let position = &self.position[i].0;
                 if position.product == product
-                    && (position.side == Side::BuyLong && low_price <= position.liquidation_price
-                        || position.side == Side::SellShort
-                            && high_price >= position.liquidation_price)
+                    && (position.side == Side::BuyLong && low <= position.liquidation_price
+                        || position.side == Side::SellShort && high >= position.liquidation_price)
                 {
                     if self.config.isolated {
                         let mut position = self.position.swap_remove(i).0;
@@ -634,78 +649,79 @@ impl MatchmakingEngine {
 
                         self.history.push(position);
                     } else {
-                        for (product, (_, time, _, _, _)) in
-                            self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
-                        {
-                            for i in (0..self.position.len()).rev() {
-                                let position = &self.position[i].0;
-                                if position.product == product {
-                                    let mut position = self.position.swap_remove(i).0;
+                        todo!("全仓");
+                        // for (product, (_, time, _, _, _)) in
+                        //     self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
+                        // {
+                        //     for i in (0..self.position.len()).rev() {
+                        //         let position = &self.position[i].0;
+                        //         if position.product == product {
+                        //             let mut position = self.position.swap_remove(i).0;
 
-                                    position.profit = -position.margin;
+                        //             position.profit = -position.margin;
 
-                                    position.profit_ratio = position.profit / position.margin;
+                        //             position.profit_ratio = position.profit / position.margin;
 
-                                    position.fee = position.list.iter().map(|v| v.fee).sum();
+                        //             position.fee = position.list.iter().map(|v| v.fee).sum();
 
-                                    let mut max_quantity = 0.0;
+                        //             let mut max_quantity = 0.0;
 
-                                    let mut sum_quantity = 0.0;
+                        //             let mut sum_quantity = 0.0;
 
-                                    let mut max_margin = 0.0;
+                        //             let mut max_margin = 0.0;
 
-                                    let mut sum_margin = 0.0;
+                        //             let mut sum_margin = 0.0;
 
-                                    position
-                                        .list
-                                        .iter()
-                                        .filter(|v| {
-                                            v.side == Side::BuyLong || v.side == Side::SellShort
-                                        })
-                                        .for_each(|v| {
-                                            sum_quantity += v.quantity * v.side.factor();
-                                            if sum_quantity > max_quantity {
-                                                max_quantity = sum_quantity;
-                                            }
-                                            sum_margin += v.margin * v.side.factor();
-                                            if sum_margin > max_margin {
-                                                max_margin = sum_margin;
-                                            }
-                                        });
+                        //             position
+                        //                 .list
+                        //                 .iter()
+                        //                 .filter(|v| {
+                        //                     v.side == Side::BuyLong || v.side == Side::SellShort
+                        //                 })
+                        //                 .for_each(|v| {
+                        //                     sum_quantity += v.quantity * v.side.factor();
+                        //                     if sum_quantity > max_quantity {
+                        //                         max_quantity = sum_quantity;
+                        //                     }
+                        //                     sum_margin += v.margin * v.side.factor();
+                        //                     if sum_margin > max_margin {
+                        //                         max_margin = sum_margin;
+                        //                     }
+                        //                 });
 
-                                    // 最大持仓量
-                                    position.quantity = max_quantity.abs();
+                        //             // 最大持仓量
+                        //             position.quantity = max_quantity.abs();
 
-                                    // 最大保证金
-                                    position.margin = max_margin.abs();
+                        //             // 最大保证金
+                        //             position.margin = max_margin.abs();
 
-                                    position.close_price = position.liquidation_price;
+                        //             position.close_price = position.liquidation_price;
 
-                                    position.close_time = time;
+                        //             position.close_time = time;
 
-                                    position.list.push(SubPosition {
-                                        side: position.side.neg(),
-                                        price: position.liquidation_price,
-                                        quantity: position.quantity,
-                                        margin: position.margin,
-                                        fee: 0.0,
-                                        profit: position.profit,
-                                        profit_ratio: position.profit_ratio,
-                                        time: position.close_time,
-                                    });
+                        //             position.list.push(SubPosition {
+                        //                 side: position.side.neg(),
+                        //                 price: position.liquidation_price,
+                        //                 quantity: position.quantity,
+                        //                 margin: position.margin,
+                        //                 fee: 0.0,
+                        //                 profit: position.profit,
+                        //                 profit_ratio: position.profit_ratio,
+                        //                 time: position.close_time,
+                        //             });
 
-                                    self.history.push(position);
-                                }
-                            }
-                            break 'a;
-                        }
+                        //             self.history.push(position);
+                        //         }
+                        //     }
+                        //     break 'a;
+                        // }
                     }
                 }
             }
         }
 
         // 处理委托
-        for (product, (_, time, _, _, close_price)) in
+        for (product, (_, time, high, low, _)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             self.delegate.retain(|_, delegate| {
@@ -714,8 +730,9 @@ impl MatchmakingEngine {
                 }
 
                 if delegate.side == Side::BuyLong || delegate.side == Side::SellShort {
-                    if delegate.side == Side::BuyLong && close_price <= delegate.price
-                        || delegate.side == Side::SellShort && close_price >= delegate.price
+                    // 开仓委托
+                    if delegate.side == Side::BuyLong && low <= delegate.price
+                        || delegate.side == Side::SellShort && high >= delegate.price
                     {
                         if delegate.isolated {
                             // 查找现有仓位
@@ -829,7 +846,8 @@ impl MatchmakingEngine {
                                         sub_delegate.push(SubDelegate {
                                             side: delegate.side.neg(),
                                             quantity: delegate.quantity,
-                                            condition: delegate.stop_loss_condition,
+                                            condition: delegate.stop_loss_condition
+                                                * delegate.side.neg().factor(),
                                             price: delegate.stop_loss,
                                             is_config: false,
                                         });
@@ -839,17 +857,43 @@ impl MatchmakingEngine {
                                     if self.config.stop_profit != 0.0 {
                                         let delegate = sub_delegate
                                             .iter_mut()
-                                            .find(|v| v.is_config && v.side == Side::BuySell)
+                                            .find(|v| v.is_config && v.side == v.side.neg())
                                             .unwrap();
                                         delegate.condition = new_price
                                             + self.config.stop_profit.to_quantity(new_price)
                                                 * new_side.factor();
                                     }
 
+                                    if self.config.stop_profit != 0.0 {
+                                        sub_delegate.push(SubDelegate {
+                                            side: new_side,
+                                            quantity: new_quantity,
+                                            condition: (new_price
+                                                + self.config.stop_profit.to_quantity(new_price)
+                                                    * new_side.factor())
+                                                * new_side.factor(),
+                                            price: 0.0,
+                                            is_config: true,
+                                        });
+                                    }
+
+                                    if self.config.stop_loss != 0.0 {
+                                        sub_delegate.push(SubDelegate {
+                                            side: new_side,
+                                            quantity: new_quantity,
+                                            condition: (new_price
+                                                + self.config.stop_loss.to_quantity(new_price)
+                                                    * new_side.factor())
+                                                * new_side.neg().factor(),
+                                            price: 0.0,
+                                            is_config: true,
+                                        });
+                                    }
+
                                     if self.config.stop_loss != 0.0 {
                                         let delegate = sub_delegate
                                             .iter_mut()
-                                            .find(|v| v.is_config && v.side == Side::SellLong)
+                                            .find(|v| v.is_config && v.side == v.side.neg())
                                             .unwrap();
                                         delegate.condition = new_price
                                             + self.config.stop_loss.to_quantity(new_price)
@@ -885,7 +929,8 @@ impl MatchmakingEngine {
                                         sub_delegate.push(SubDelegate {
                                             side: delegate.side.neg(),
                                             quantity: delegate.quantity,
-                                            condition: delegate.stop_profit_condition,
+                                            condition: delegate.stop_profit_condition
+                                                * delegate.side.factor(),
                                             price: delegate.stop_profit,
                                             is_config: false,
                                         });
@@ -895,7 +940,8 @@ impl MatchmakingEngine {
                                         sub_delegate.push(SubDelegate {
                                             side: delegate.side.neg(),
                                             quantity: delegate.quantity,
-                                            condition: delegate.stop_loss_condition,
+                                            condition: delegate.stop_loss_condition
+                                                * delegate.side.neg().factor(),
                                             price: delegate.stop_loss,
                                             is_config: false,
                                         });
@@ -906,9 +952,10 @@ impl MatchmakingEngine {
                                         sub_delegate.push(SubDelegate {
                                             side: new_side,
                                             quantity: new_quantity,
-                                            condition: new_price
+                                            condition: (new_price
                                                 + self.config.stop_profit.to_quantity(new_price)
-                                                    * new_side.factor(),
+                                                    * new_side.factor())
+                                                * new_side.factor(),
                                             price: 0.0,
                                             is_config: true,
                                         });
@@ -918,9 +965,10 @@ impl MatchmakingEngine {
                                         sub_delegate.push(SubDelegate {
                                             side: new_side,
                                             quantity: new_quantity,
-                                            condition: new_price
+                                            condition: (new_price
                                                 + self.config.stop_loss.to_quantity(new_price)
-                                                    * new_side.factor(),
+                                                    * new_side.factor())
+                                                * new_side.neg().factor(),
                                             price: 0.0,
                                             is_config: true,
                                         });
@@ -941,6 +989,7 @@ impl MatchmakingEngine {
                     .find(|v| v.0.product == delegate.product)
                     .map(|v| &mut v.1)
                 {
+                    // 平仓委托
                     v.push(SubDelegate {
                         side: delegate.side,
                         quantity: delegate.quantity,
@@ -957,7 +1006,7 @@ impl MatchmakingEngine {
         }
 
         // 处理止盈止损
-        for (product, (_, time, _, _, close_price)) in
+        for (product, (_, time, high, low, _)) in
             self.product.iter().map(|v| (v.0.as_str(), v.1.to_owned()))
         {
             for i in (0..self.position.len()).rev() {
@@ -965,9 +1014,15 @@ impl MatchmakingEngine {
                 if position.product == product {
                     for i in (0..sub_delegate.len()).rev() {
                         let delegate = &sub_delegate[i];
-                        if delegate.side == Side::BuySell && close_price >= delegate.condition
-                            || delegate.side == Side::SellLong && close_price <= delegate.condition
+
+                        if delegate.side == Side::BuySell
+                            && (delegate.condition >= 0.0 && high >= delegate.condition
+                                || delegate.condition <= 0.0 && low <= delegate.condition.abs())
+                            || delegate.side == Side::SellLong
+                                && (delegate.condition >= 0.0 && high >= delegate.condition
+                                    || delegate.condition <= 0.0 && low <= delegate.condition.abs())
                         {
+                            println!("{} {}", low, delegate.condition);
                             if delegate.price == 0.0 {
                                 // 限价触发，市价委托
                                 let margin =
@@ -1053,7 +1108,7 @@ impl MatchmakingEngine {
                         // 最大保证金
                         position.margin = max_margin.abs();
 
-                        position.close_price = close_price;
+                        position.close_price = position.list.last().unwrap().price;
 
                         position.close_time = time;
 
@@ -1074,7 +1129,7 @@ struct SubDelegate {
     /// 持仓量。
     quantity: f64,
 
-    /// 条件。
+    /// 条件，整数表示大于等于，负数表示小于等于。
     condition: f64,
 
     /// 价格。
