@@ -7,9 +7,10 @@ async fn main() {
         let lx = start * 0.09;
         start += lx;
         println!(
-            "第 {} 天 利息 {} 余额 {} 换算人民币 {}",
+            "第 {} 天 利息 {} 换算人民币 {} 余额 {} 换算人民币 {}",
             i + 1,
             lx,
+            lx * 0.075 * 7.2,
             start,
             start * 0.075 * 7.2
         );

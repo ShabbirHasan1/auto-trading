@@ -1,9 +1,9 @@
 mod backtester;
 mod base;
-mod bourse;
+mod exchange;
 mod util;
 
 pub use backtester::*;
 pub use base::*;
-pub use bourse::*;
+pub use exchange::*;
 pub use util::*;

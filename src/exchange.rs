@@ -29,11 +29,11 @@ pub trait Bourse {
 
 /// 本地交易所。
 #[derive(Debug, Clone)]
-pub struct LocalBourse {
+pub struct LocalExchange {
     inner: std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>,
 }
 
-impl LocalBourse {
+impl LocalExchange {
     pub fn new() -> Self {
         Self {
             inner: std::collections::HashMap::new(),
@@ -79,7 +79,7 @@ impl LocalBourse {
     }
 }
 
-impl std::ops::Deref for LocalBourse {
+impl std::ops::Deref for LocalExchange {
     type Target =
         std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>;
 
@@ -88,14 +88,14 @@ impl std::ops::Deref for LocalBourse {
     }
 }
 
-impl std::ops::DerefMut for LocalBourse {
+impl std::ops::DerefMut for LocalExchange {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
     }
 }
 
 #[async_trait::async_trait]
-impl Bourse for LocalBourse {
+impl Bourse for LocalExchange {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
