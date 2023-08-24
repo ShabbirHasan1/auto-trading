@@ -2,77 +2,70 @@ use auto_trading::*;
 
 #[tokio::main]
 async fn main() {
-    let mut start = 2000.0;
-    for i in 0..180 {
-        let lx = start * 0.09;
-        start += lx;
-        println!(
-            "第 {} 天 利息 {} 换算人民币 {} 余额 {} 换算人民币 {}",
-            i + 1,
-            lx,
-            lx * 0.075 * 7.2,
-            start,
-            start * 0.075 * 7.2
-        );
-    }
+    let mut a = true;
+    let mut b = true;
 
-    // let mut flag = true;
-    // let mut count = 0;
-    // let strategy = |cx: &mut Context| {
-    //     if cx.time >= 1687377600000 && cx.low <= 29800 && flag {
-    //         let result = cx.order_condition(Side::BuyLong, 29862.0, 0, 32000, 29200, 0, 0);
-    //         println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-    //         count += 1;
+    let strategy = |cx: &mut Context| {
+        if cci(cx.close, 20) <= -100.0 && a {
+            let result = cx.order(Side::BuyLong, 0.0);
+            println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
+            // let result = cx.order(Side::BuyLong, cx.close - 100);
+            // println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
+            // let result = cx.order(Side::BuyLong, cx.close - 200);
+            // println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
 
-    //         if count == 3 {
-    //             flag = false;
-    //         }
-    //     }
-    // };
+            let result = cx.order(Side::SellShort, 0.0);
+            println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
+            // let result = cx.order(Side::SellShort, cx.close + 100);
+            // println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
+            // let result = cx.order(Side::SellShort, cx.close + 200);
+            // println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
+            a = false;
+        }
+    };
 
-    // let mut bourse = LocalBourse::new();
+    let mut bourse = LocalExchange::new();
 
-    // bourse
-    //     .level_k(
-    //         "BTC-USDT-SWAP",
-    //         Level::Minute1,
-    //         serde_json::from_str::<Vec<K>>(
-    //             &std::fs::read_to_string("./BTC-USDT-SWAP-1m.txt").unwrap(),
-    //         )
-    //         .unwrap(),
-    //     )
-    //     .min_unit("BTC-USDT-SWAP", 0.01)
-    //     .level_k(
-    //         "BTC-USDT-SWAP",
-    //         Level::Hour4,
-    //         serde_json::from_str::<Vec<K>>(
-    //             &std::fs::read_to_string("./BTC-USDT-SWAP-4h.txt").unwrap(),
-    //         )
-    //         .unwrap(),
-    //     )
-    //     .min_unit("BTC-USDT-SWAP", 0.01);
+    bourse
+        .level_k(
+            "BTC-USDT-SWAP",
+            Level::Minute1,
+            serde_json::from_str::<Vec<K>>(
+                &std::fs::read_to_string("./BTC-USDT-SWAP-1m.txt").unwrap(),
+            )
+            .unwrap(),
+        )
+        .min_unit("BTC-USDT-SWAP", 0.01)
+        .level_k(
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            serde_json::from_str::<Vec<K>>(
+                &std::fs::read_to_string("./BTC-USDT-SWAP-4h.txt").unwrap(),
+            )
+            .unwrap(),
+        )
+        .min_unit("BTC-USDT-SWAP", 0.01);
 
-    // let config = Config::new()
-    //     .initial_margin(1000.0)
-    //     .open_fee(0.0002)
-    //     .close_fee(0.0005)
-    //     .maintenance(0.004)
-    //     .lever(100)
-    //     .margin(Unit::Proportion(2.0))
-    //     .isolated(true);
+    let config = Config::new()
+        .initial_margin(1000.0)
+        .open_fee(0.0002)
+        .close_fee(0.0005)
+        .maintenance(0.004)
+        .lever(100)
+        .margin(Unit::Proportion(2.0));
 
-    // let bt = Backtester::new(bourse, config);
+    let bt = Backtester::new(bourse, config);
 
-    // // 1659539044000..1691075044000
-    // let result = bt
-    //     .start(strategy, "BTC-USDT-SWAP", Level::Hour4, 1687665600000..)
-    //     .await
-    //     .unwrap();
+    // 1659539044000..1691075044000
+    let result = bt
+        .start(strategy, "BTC-USDT-SWAP", Level::Hour4, 1687377600000..)
+        .await
+        .unwrap();
 
-    // println!("{:#?}", result);
-    // // std::fs::write("./list.txt", format!("{:#?}", result));
+    println!("{:#?}", result);
+    // std::fs::write("./list.txt", format!("{:#?}", result));
 
-    // println!("{}", result.iter().map(|v| v.profit).sum::<f64>());
+    println!("{}", result.iter().map(|v| v.profit).sum::<f64>());
 }
 
 #[tokio::test]

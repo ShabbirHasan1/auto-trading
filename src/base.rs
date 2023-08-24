@@ -386,9 +386,6 @@ pub struct Delegate {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
 
-    /// 逐仓。
-    pub isolated: bool,
-
     /// 杠杆。
     pub lever: u32,
 
@@ -450,9 +447,6 @@ pub struct SubPosition {
 pub struct Position {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: String,
-
-    /// 逐仓。
-    pub isolated: bool,
 
     /// 杠杆。
     pub lever: u32,
@@ -535,7 +529,6 @@ impl<'a> Context<'a> {
     /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
-    /// 止盈止损委托为只减仓，平仓数量为 `quantity`，如果 [`Config`] 进行了平仓操作，那么止盈止损委托也会被撤销。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
@@ -559,7 +552,6 @@ impl<'a> Context<'a> {
     /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
-    /// 止盈止损委托为只减仓，平仓数量为 `quantity`，如果 [`Config`] 进行了平仓操作，那么止盈止损委托也会被撤销。
     ///
     /// * `side` 订单方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
@@ -713,8 +705,6 @@ impl std::cmp::PartialEq<f64> for Unit {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub initial_margin: f64,
-    pub isolated: bool,
-    pub position_mode: bool,
     pub lever: u32,
     pub open_fee: f64,
     pub close_fee: f64,
@@ -723,16 +713,12 @@ pub struct Config {
     pub quantity: f64,
     pub max_margin: f64,
     pub margin: Unit,
-    pub stop_profit: Unit,
-    pub stop_loss: Unit,
 }
 
 impl Config {
     pub fn new() -> Self {
         Config {
             initial_margin: 0.0,
-            isolated: false,
-            position_mode: false,
             lever: 1,
             open_fee: 0.0,
             close_fee: 0.0,
@@ -741,29 +727,14 @@ impl Config {
             quantity: 0.0,
             margin: 0.into(),
             max_margin: 0.into(),
-            stop_profit: 0.into(),
-            stop_loss: 0.into(),
+            // stop_profit: 0.into(),
+            // stop_loss: 0.into(),
         }
     }
 
     /// 初始保证金。
     pub fn initial_margin(mut self, value: f64) -> Self {
         self.initial_margin = value;
-        self
-    }
-
-    /// 逐仓。
-    pub fn isolated(mut self, value: bool) -> Self {
-        self.isolated = value;
-        self
-    }
-
-    /// 仓位模式。
-    ///
-    /// true 表示开平仓模式，一个合约可同时持有多空两个方向的仓位。
-    /// false 表示买卖模式，一个合约仅可持有一个方向的仓位。
-    pub fn position_mode(mut self, value: bool) -> Self {
-        self.position_mode = value;
         self
     }
 
@@ -821,24 +792,6 @@ impl Config {
         T: Into<Unit>,
     {
         self.margin = value.into();
-        self
-    }
-
-    /// 单笔止盈数量。
-    pub fn stop_profit<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
-        self.stop_profit = value.into();
-        self
-    }
-
-    /// 单笔止损数量。
-    pub fn stop_loss<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
-        self.stop_loss = value.into();
         self
     }
 }
