@@ -1,5 +1,12 @@
 use crate::*;
 
+pub fn yield_map<'a, F>(source: &'a Source, f: F) -> impl Iterator<Item = f64> + 'a
+where
+    F: FnMut(&Source) -> f64 + 'a,
+{
+    source.iter().enumerate().map(|v| &source[v.0..]).map(f)
+}
+
 pub fn highest(source: &Source, length: usize) -> f64 {
     *source
         .iter()
@@ -25,7 +32,7 @@ where
     F: FnMut(&Source) -> f64,
 {
     source
-        .iter()
+        .into_iter()
         .take(length)
         .enumerate()
         .map(|v| &source[v.0..])
@@ -34,22 +41,44 @@ where
         / length as f64
 }
 
-pub fn ema(source: &Source, length: usize) -> f64 {
-    let alpha = 2.0 / (length as f64 + 1.0);
-    let mut sum = 0.0;
-    for i in 0..source.len() {
-        if i < length {
-            sum += source[i];
-        } else {
-            sum = alpha * source[i] + (1.0 - alpha) * sum;
+pub fn ema<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    fn inner<S>(x: S, n: usize) -> f64
+    where
+        S: IntoIterator<Item = f64>,
+    {
+        let mut iter = x.into_iter();
+        match iter.next() {
+            Some(v) => (2.0 * v + (n - 1) as f64 * inner(iter, n - 1)) / (n + 1) as f64,
+            None => 0.0,
         }
     }
-    sum / length as f64
+
+    inner(source, length)
 }
 
 pub fn cci(source: &Source, length: usize) -> f64 {
     let ma = sma(source, length);
     (source[0] - ma) / (0.015 * sma_map(source, length, |v| (v[0] - ma).abs()))
+}
+
+pub fn macd(
+    source: &Source,
+    short_length: usize,
+    long_length: usize,
+    dea_length: usize,
+) -> (f64, f64, f64) {
+    let short_line = yield_map(source, |source| ema(source, short_length));
+    let long_line = yield_map(source, |source| ema(source, long_length));
+    let dif = short_line.zip(long_line).map(|v| v.0 - v.1);
+    let dea = ema(dif, dea_length);
+    let short_line = yield_map(source, |source| ema(source, short_length));
+    let long_line = yield_map(source, |source| ema(source, long_length));
+    let dif = short_line.zip(long_line).map(|v| v.0 - v.1).sum::<f64>();
+    let macd = (dif - dea) * 2.0;
+    (dif, dea, macd)
 }
 
 /// 时间戳转换到本地时间文本。

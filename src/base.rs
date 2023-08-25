@@ -148,13 +148,37 @@ where
     }
 }
 
-impl<'a> IntoIterator for &'a Source {
-    type Item = &'a f64;
+pub struct SourceIter<'a> {
+    inner: &'a Source,
+}
 
-    type IntoIter = std::slice::Iter<'a, f64>;
+impl<'a> SourceIter<'a> {
+    pub fn new(inner: &'a Source) -> Self {
+        Self { inner }
+    }
+}
+
+impl Iterator for SourceIter<'_> {
+    type Item = f64;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let result = self.inner[0];
+        if result.is_nan() {
+            None
+        } else {
+            self.inner = &self.inner[1..];
+            Some(result)
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a Source {
+    type Item = f64;
+
+    type IntoIter = SourceIter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.inner.into_iter()
+        SourceIter::new(self)
     }
 }
 

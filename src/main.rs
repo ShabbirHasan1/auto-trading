@@ -6,22 +6,7 @@ async fn main() {
     let mut b = true;
 
     let strategy = |cx: &mut Context| {
-        if cci(cx.close, 20) <= -100.0 && a {
-            let result = cx.order(Side::BuyLong, 0.0);
-            println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-            // let result = cx.order(Side::BuyLong, cx.close - 100);
-            // println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-            // let result = cx.order(Side::BuyLong, cx.close - 200);
-            // println!("做多 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-
-            let result = cx.order(Side::SellShort, 0.0);
-            println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-            // let result = cx.order(Side::SellShort, cx.close + 100);
-            // println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-            // let result = cx.order(Side::SellShort, cx.close + 200);
-            // println!("做空 {} {} {:?}", time_to_string(cx.time), cx.time, result);
-            a = false;
-        }
+        println!("{:?}", macd(cx.close, 12, 26, 9));
     };
 
     let mut bourse = LocalExchange::new();
