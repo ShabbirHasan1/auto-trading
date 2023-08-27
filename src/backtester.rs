@@ -2,22 +2,22 @@ use crate::*;
 
 /// 回测器。
 pub struct Backtester<T> {
-    bourse: T,
+    exchange: T,
     config: Config,
     other_product: bool,
 }
 
 impl<T> Backtester<T>
 where
-    T: Bourse,
+    T: Exchange,
 {
     /// 构造回测器。
     ///
-    /// * `bourse` 交易所。
+    /// * `exchange` 交易所。
     /// * `config` 交易配置。
-    pub fn new(bourse: T, config: Config) -> Self {
+    pub fn new(exchange: T, config: Config) -> Self {
         Self {
-            bourse,
+            exchange,
             config,
             other_product: false,
         }
@@ -60,7 +60,7 @@ where
 
         let range = range.into();
 
-        let k = self.get_k_range(product, level, range).await?;
+        let k = get_k_range(&self.exchange, product, level, range).await?;
 
         let time = k.iter().map(|v| v.time).collect::<Vec<_>>();
 
@@ -72,7 +72,7 @@ where
 
         let close = k.iter().map(|v| v.close).collect::<Vec<_>>();
 
-        let unit = self.bourse.get_unit(product).await?;
+        let unit = self.exchange.get_unit(product).await?;
 
         let me = std::cell::RefCell::new(MatchmakingEngine::new(self.config));
 
@@ -127,63 +127,6 @@ where
         }
 
         Ok(me.into_inner().history)
-    }
-
-    pub async fn get_k_range(
-        &self,
-        product: &str,
-        level: Level,
-        range: TimeRange,
-    ) -> anyhow::Result<Vec<K>> {
-        let mut result = Vec::new();
-
-        if range.start == 0 && range.end == 0 {
-            let mut time = 0;
-
-            loop {
-                let v = self.bourse.get_k(product, level, time).await?;
-
-                if let Some(k) = v.last() {
-                    time = k.time;
-                    result.extend(v);
-                } else {
-                    break;
-                }
-            }
-
-            return Ok(result);
-        }
-
-        let mut end = range.end;
-
-        if end == u64::MAX - 1 {
-            end = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-        }
-
-        loop {
-            let v = self.bourse.get_k(product, level, end).await?;
-
-            if let Some(k) = v.last() {
-                if k.time < range.start {
-                    for i in v {
-                        if i.time >= range.start {
-                            result.push(i);
-                        }
-                    }
-                    break;
-                }
-
-                end = k.time;
-                result.extend(v);
-            } else {
-                break;
-            }
-        }
-
-        Ok(result)
     }
 }
 
@@ -878,21 +821,22 @@ impl MatchmakingEngine {
                             .for_each(|v| {
                                 sum_quantity += v.quantity * v.side.factor();
 
-                                if sum_quantity > max_quantity {
-                                    max_quantity = sum_quantity;
+                                if sum_quantity.abs() > max_quantity {
+                                    max_quantity = sum_quantity.abs();
                                 }
+
                                 sum_margin += v.margin * v.side.factor();
 
-                                if sum_margin > max_margin {
-                                    max_margin = sum_margin;
+                                if sum_margin.abs() > max_margin {
+                                    max_margin = sum_margin.abs();
                                 }
                             });
 
                         // 最大持仓量
-                        position.quantity = max_quantity.abs();
+                        position.quantity = max_quantity;
 
                         // 最大保证金
-                        position.margin = max_margin.abs();
+                        position.margin = max_margin;
 
                         position.close_price = position.list.last().unwrap().price;
 
@@ -941,22 +885,22 @@ impl MatchmakingEngine {
                         .for_each(|v| {
                             sum_quantity += v.quantity * v.side.factor();
 
-                            if sum_quantity > max_quantity {
-                                max_quantity = sum_quantity;
+                            if sum_quantity.abs() > max_quantity {
+                                max_quantity = sum_quantity.abs();
                             }
 
                             sum_margin += v.margin * v.side.factor();
 
-                            if sum_margin > max_margin {
-                                max_margin = sum_margin;
+                            if sum_margin.abs() > max_margin {
+                                max_margin = sum_margin.abs();
                             }
                         });
 
                     // 最大持仓量
-                    position.quantity = max_quantity.abs();
+                    position.quantity = max_quantity;
 
                     // 最大保证金
-                    position.margin = max_margin.abs();
+                    position.margin = max_margin;
 
                     position.close_price = position.liquidation_price;
 

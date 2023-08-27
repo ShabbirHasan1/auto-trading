@@ -1,57 +1,7 @@
 use auto_trading::*;
 
 #[tokio::main]
-async fn main() {
-    let mut a = true;
-    let mut b = true;
-
-    let strategy = |cx: &mut Context| {
-        println!("{:?}", macd(cx.close, 12, 26, 9));
-    };
-
-    let mut bourse = LocalExchange::new();
-
-    bourse
-        .level_k(
-            "BTC-USDT-SWAP",
-            Level::Minute1,
-            serde_json::from_str::<Vec<K>>(
-                &std::fs::read_to_string("./BTC-USDT-SWAP-1m.txt").unwrap(),
-            )
-            .unwrap(),
-        )
-        .min_unit("BTC-USDT-SWAP", 0.01)
-        .level_k(
-            "BTC-USDT-SWAP",
-            Level::Hour4,
-            serde_json::from_str::<Vec<K>>(
-                &std::fs::read_to_string("./BTC-USDT-SWAP-4h.txt").unwrap(),
-            )
-            .unwrap(),
-        )
-        .min_unit("BTC-USDT-SWAP", 0.01);
-
-    let config = Config::new()
-        .initial_margin(1000.0)
-        .open_fee(0.0002)
-        .close_fee(0.0005)
-        .maintenance(0.004)
-        .lever(100)
-        .margin(Unit::Proportion(2.0));
-
-    let bt = Backtester::new(bourse, config);
-
-    // 1659539044000..1691075044000
-    let result = bt
-        .start(strategy, "BTC-USDT-SWAP", Level::Hour4, 1687377600000..)
-        .await
-        .unwrap();
-
-    println!("{:#?}", result);
-    // std::fs::write("./list.txt", format!("{:#?}", result));
-
-    println!("{}", result.iter().map(|v| v.profit).sum::<f64>());
-}
+async fn main() {}
 
 #[tokio::test]
 async fn get_k() {

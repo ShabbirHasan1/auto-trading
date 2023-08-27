@@ -117,6 +117,10 @@ impl Source {
         <&Self>::from(value)
     }
 
+    pub fn into_inner(&self) -> &[f64] {
+        &self.inner
+    }
+
     fn index<T>(&self, index: T) -> &Source
     where
         T: std::slice::SliceIndex<[f64], Output = [f64]>,
@@ -128,14 +132,6 @@ impl Source {
                     .unwrap_or(&[]),
             )
         }
-    }
-}
-
-impl std::ops::Deref for Source {
-    type Target = [f64];
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

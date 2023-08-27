@@ -4,27 +4,89 @@ pub fn yield_map<'a, F>(source: &'a Source, f: F) -> impl Iterator<Item = f64> +
 where
     F: FnMut(&Source) -> f64 + 'a,
 {
-    source.iter().enumerate().map(|v| &source[v.0..]).map(f)
+    source
+        .into_iter()
+        .enumerate()
+        .map(|v| &source[v.0..])
+        .map(f)
 }
 
-pub fn highest(source: &Source, length: usize) -> f64 {
-    *source
-        .iter()
-        .take(length)
-        .max_by(|a, b| a.total_cmp(b))
-        .unwrap_or(&f64::NAN)
+pub fn highest<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    let mut source = source.into_iter();
+    let mut max = 0.0;
+    let mut count = 0;
+
+    while let Some(v) = source.next() {
+        if v > max {
+            max = v;
+        }
+
+        count += 1;
+
+        if count == length {
+            break;
+        }
+    }
+
+    if count < length {
+        return f64::NAN;
+    }
+
+    max
 }
 
-pub fn lowest(source: &Source, length: usize) -> f64 {
-    *source
-        .iter()
-        .take(length)
-        .min_by(|a, b| a.total_cmp(b))
-        .unwrap_or(&f64::NAN)
+pub fn lowest<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    let mut source = source.into_iter();
+    let mut value = 0.0;
+    let mut count = 0;
+
+    while let Some(v) = source.next() {
+        if v < value {
+            value = v;
+        }
+
+        count += 1;
+
+        if count == length {
+            break;
+        }
+    }
+
+    if count < length {
+        return f64::NAN;
+    }
+
+    value
 }
 
-pub fn sma(source: &Source, length: usize) -> f64 {
-    source.iter().take(length).sum::<f64>() / length as f64
+pub fn sma<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    let mut source = source.into_iter();
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    while let Some(v) = source.next() {
+        sum += v;
+        count += 1;
+
+        if count == length {
+            break;
+        }
+    }
+
+    if count < length {
+        return f64::NAN;
+    }
+
+    sum / length as f64
 }
 
 pub fn sma_map<F>(source: &Source, length: usize, f: F) -> f64
@@ -61,7 +123,25 @@ where
 
 pub fn cci(source: &Source, length: usize) -> f64 {
     let ma = sma(source, length);
-    (source[0] - ma) / (0.015 * sma_map(source, length, |v| (v[0] - ma).abs()))
+
+    let mut iter = yield_map(source, |v| (v - ma).abs());
+    let mut sum = 0.0;
+    let mut count = 0;
+
+    while let Some(v) = iter.next() {
+        sum += v;
+        count += 1;
+
+        if count == length {
+            break;
+        }
+    }
+
+    if count < length {
+        return f64::NAN;
+    }
+
+    (source - ma) / (0.015 * (sum / length as f64))
 }
 
 pub fn macd(
@@ -92,6 +172,78 @@ pub fn time_to_string(value: u64) -> String {
     );
     let local_datetime: chrono::DateTime<chrono::Local> = datetime.into();
     local_datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// 获取指定范围的 k 线数据。
+/// 新的数据在前面。
+///
+/// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+/// * `level` 时间级别。
+/// * `range` 时间范围，0 表示获取所有数据，a..b 表示时间戳 a 到时间戳 b 范围之内的数据，
+/// * `return` K 线数组。
+pub async fn get_k_range<E, S, T>(
+    exchange: &E,
+    product: S,
+    level: Level,
+    range: T,
+) -> anyhow::Result<Vec<K>>
+where
+    E: Exchange,
+    S: AsRef<str>,
+    T: Into<TimeRange>,
+{
+    let product = product.as_ref();
+    let range = range.into();
+
+    let mut result = Vec::new();
+
+    if range.start == 0 && range.end == 0 {
+        let mut time = 0;
+
+        loop {
+            let v = exchange.get_k(product, level, time).await?;
+
+            if let Some(k) = v.last() {
+                time = k.time;
+                result.extend(v);
+            } else {
+                break;
+            }
+        }
+
+        return Ok(result);
+    }
+
+    let mut end = range.end;
+
+    if end == u64::MAX - 1 {
+        end = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+    }
+
+    loop {
+        let v = exchange.get_k(product, level, end).await?;
+
+        if let Some(k) = v.last() {
+            if k.time < range.start {
+                for i in v {
+                    if i.time >= range.start {
+                        result.push(i);
+                    }
+                }
+                break;
+            }
+
+            end = k.time;
+            result.extend(v);
+        } else {
+            break;
+        }
+    }
+
+    Ok(result)
 }
 
 /// 交易产品映射。

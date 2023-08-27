@@ -4,8 +4,8 @@ use crate::*;
 
 /// 交易所。
 #[async_trait::async_trait]
-pub trait Bourse {
-    /// 获取 K 线价格。
+pub trait Exchange {
+    /// 获取 K 线数据。
     /// 新的数据在前面。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
@@ -95,7 +95,7 @@ impl std::ops::DerefMut for LocalExchange {
 }
 
 #[async_trait::async_trait]
-impl Bourse for LocalExchange {
+impl Exchange for LocalExchange {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
@@ -178,7 +178,7 @@ impl Okx {
 }
 
 #[async_trait::async_trait]
-impl Bourse for Okx {
+impl Exchange for Okx {
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
@@ -380,7 +380,7 @@ impl Binance {
 }
 
 #[async_trait::async_trait]
-impl crate::Bourse for Binance {
+impl crate::Exchange for Binance {
     async fn get_k<S>(
         &self,
         product: S,
@@ -515,14 +515,14 @@ mod tests {
 
     #[tokio::test]
     async fn okx_get_k() {
-        let bourse = Okx::new().unwrap();
+        let exchange = Okx::new().unwrap();
 
-        let k1 = bourse
+        let k1 = exchange
             .get_k("BTC-USDT-SWAP", Level::Hour1, 0)
             .await
             .unwrap();
 
-        let k2 = bourse
+        let k2 = exchange
             .get_k("BTC-USDT-SWAP", Level::Hour1, k1.last().unwrap().time)
             .await
             .unwrap();
@@ -537,23 +537,23 @@ mod tests {
 
     #[tokio::test]
     async fn okx_get_min_unit() {
-        let bourse = Okx::new().unwrap();
-        let x = bourse.get_unit("BTC-USDT-SWAP").await.unwrap();
+        let exchange = Okx::new().unwrap();
+        let x = exchange.get_unit("BTC-USDT-SWAP").await.unwrap();
         assert!(x == 0.01);
-        let x = bourse.get_unit("BTC-USDT").await.unwrap();
+        let x = exchange.get_unit("BTC-USDT").await.unwrap();
         assert!(x == 0.00001);
     }
 
     #[tokio::test]
     async fn binance_get_k() {
-        let bourse = Binance::new().unwrap();
+        let exchange = Binance::new().unwrap();
 
-        let k1 = bourse
+        let k1 = exchange
             .get_k("BTC-USDT-SWAP", Level::Hour1, 0)
             .await
             .unwrap();
 
-        let k2 = bourse
+        let k2 = exchange
             .get_k("BTC-USDT-SWAP", Level::Hour1, k1.last().unwrap().time)
             .await
             .unwrap();
