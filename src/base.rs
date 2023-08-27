@@ -117,10 +117,6 @@ impl Source {
         <&Self>::from(value)
     }
 
-    pub fn into_inner(&self) -> &[f64] {
-        &self.inner
-    }
-
     fn index<T>(&self, index: T) -> &Source
     where
         T: std::slice::SliceIndex<[f64], Output = [f64]>,
@@ -141,6 +137,14 @@ where
 {
     fn from(value: T) -> Self {
         unsafe { std::mem::transmute(value.as_ref()) }
+    }
+}
+
+impl std::ops::Deref for Source {
+    type Target = [f64];
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
@@ -286,6 +290,16 @@ overload::overload!((a: &Source) - (b: f64) -> f64 { a[0] - b });
 overload::overload!((a: &Source) * (b: f64) -> f64 { a[0] * b });
 overload::overload!((a: &Source) / (b: f64) -> f64 { a[0] / b });
 overload::overload!((a: &Source) % (b: f64) -> f64 { a[0] % b });
+overload::overload!((a: i64) + (b: &Source) -> f64 { a as f64 + b[0] });
+overload::overload!((a: i64) - (b: &Source) -> f64 { a as f64 - b[0] });
+overload::overload!((a: i64) * (b: &Source) -> f64 { a as f64 * b[0] });
+overload::overload!((a: i64) / (b: &Source) -> f64 { a as f64 / b[0] });
+overload::overload!((a: i64) % (b: &Source) -> f64 { a as f64 % b[0] });
+overload::overload!((a: f64) + (b: &Source) -> f64 { a + b[0] });
+overload::overload!((a: f64) - (b: &Source) -> f64 { a - b[0] });
+overload::overload!((a: f64) * (b: &Source) -> f64 { a * b[0] });
+overload::overload!((a: f64) / (b: &Source) -> f64 { a / b[0] });
+overload::overload!((a: f64) % (b: &Source) -> f64 { a % b[0] });
 overload::overload!((a: &Source) + (b: &Source) -> f64 { a[0] + b[0] });
 overload::overload!((a: &Source) - (b: &Source) -> f64 { a[0] - b[0] });
 overload::overload!((a: &Source) * (b: &Source) -> f64 { a[0] * b[0] });

@@ -11,136 +11,150 @@ where
         .map(f)
 }
 
-pub fn highest<S>(source: S, length: usize) -> f64
+pub fn yield_nan<'a, F>(source: &'a Source, mut f: F) -> f64
 where
-    S: IntoIterator<Item = f64>,
+    F: FnMut(f64, &Source) -> f64 + 'a,
 {
-    let mut source = source.into_iter();
-    let mut max = 0.0;
-    let mut count = 0;
-
-    while let Some(v) = source.next() {
-        if v > max {
-            max = v;
-        }
-
-        count += 1;
-
-        if count == length {
-            break;
+    fn inner<'a, F>(source: &'a Source, f: &mut F) -> f64
+    where
+        F: FnMut(f64, &Source) -> f64 + 'a,
+    {
+        if source[1].is_nan() {
+            f(f64::NAN, source)
+        } else {
+            let prev = inner(&source[1..], f);
+            f(prev, source)
         }
     }
 
-    if count < length {
-        return f64::NAN;
-    }
-
-    max
+    inner(source, &mut f)
 }
 
-pub fn lowest<S>(source: S, length: usize) -> f64
+pub fn yield_nan_iter<'a, S, F>(source: S, mut f: F) -> f64
 where
     S: IntoIterator<Item = f64>,
+    F: FnMut(f64, &Source) -> f64 + 'a,
 {
-    let mut source = source.into_iter();
-    let mut value = 0.0;
-    let mut count = 0;
-
-    while let Some(v) = source.next() {
-        if v < value {
-            value = v;
-        }
-
-        count += 1;
-
-        if count == length {
-            break;
-        }
-    }
-
-    if count < length {
-        return f64::NAN;
-    }
-
-    value
-}
-
-pub fn sma<S>(source: S, length: usize) -> f64
-where
-    S: IntoIterator<Item = f64>,
-{
-    let mut source = source.into_iter();
-    let mut sum = 0.0;
-    let mut count = 0;
-
-    while let Some(v) = source.next() {
-        sum += v;
-        count += 1;
-
-        if count == length {
-            break;
-        }
-    }
-
-    if count < length {
-        return f64::NAN;
-    }
-
-    sum / length as f64
-}
-
-pub fn sma_map<F>(source: &Source, length: usize, f: F) -> f64
-where
-    F: FnMut(&Source) -> f64,
-{
-    source
-        .into_iter()
-        .take(length)
-        .enumerate()
-        .map(|v| &source[v.0..])
-        .map(f)
-        .sum::<f64>()
-        / length as f64
-}
-
-pub fn ema<S>(source: S, length: usize) -> f64
-where
-    S: IntoIterator<Item = f64>,
-{
-    fn inner<S>(x: S, n: usize) -> f64
+    fn inner<'a, S, F>(iter: S, source: &'a Source, f: &mut F) -> f64
     where
         S: IntoIterator<Item = f64>,
+        F: FnMut(f64, &Source) -> f64 + 'a,
     {
-        let mut iter = x.into_iter();
-        match iter.next() {
-            Some(v) => (2.0 * v + (n - 1) as f64 * inner(iter, n - 1)) / (n + 1) as f64,
-            None => 0.0,
+        if source[1].is_nan() {
+            f(f64::NAN, source)
+        } else {
+            let mut iter = iter.into_iter();
+            let new = iter.next().unwrap_or(f64::NAN);
+            let array = [source[1], new];
+            let new_source = Source::new(array);
+            let prev = inner(iter, new_source, f);
+            f(prev, source)
         }
     }
 
-    inner(source, length)
+    let mut iter = source.into_iter();
+    let new = iter.next().unwrap_or(f64::NAN);
+    let prev = iter.next().unwrap_or(f64::NAN);
+    let array = [new, prev];
+    let new_source = Source::new(array);
+
+    inner(iter, new_source, &mut f)
+}
+
+pub fn yield_fold<'a, S, F>(source: S, mut f: F) -> f64
+where
+    S: IntoIterator<Item = f64>,
+    F: FnMut(f64, &Source) -> f64 + 'a,
+{
+    let mut source = source.into_iter();
+
+    let mut last = source.next().unwrap_or(f64::NAN);
+
+    loop {
+        let second = source.next().unwrap_or(f64::NAN);
+
+        if second.is_nan() {
+            return last;
+        }
+
+        last = f(last, Source::new([second, last]));
+    }
+}
+
+pub fn highest(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
+    source
+        .into_iter()
+        .take(3)
+        .max_by(|a, b| a.total_cmp(b))
+        .unwrap()
+}
+
+pub fn lowest(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
+    source
+        .into_iter()
+        .take(3)
+        .max_by(|a, b| a.total_cmp(b))
+        .unwrap()
+}
+
+pub fn sma(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
+    source.iter().take(length).sum()
+}
+
+pub fn ema(source: &Source, length: usize) -> f64 {
+    let alpha = 2.0 / (length + 1) as f64;
+
+    yield_nan(source, |prev, source| {
+        if prev.is_nan() {
+            source[0]
+        } else {
+            alpha * source + (1.0 - alpha) * prev
+        }
+    })
+
+    // yield_fold(source, |prev, source| {
+    //     if prev.is_nan() {
+    //         source[0]
+    //     } else {
+    //         alpha * source + (1.0 - alpha) * prev
+    //     }
+    // })
+}
+
+pub fn ema_iter<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    let alpha = 2.0 / (length + 1) as f64;
+
+    yield_nan_iter(source, |prev, source| {
+        if prev.is_nan() {
+            source[0]
+        } else {
+            alpha * source + (1.0 - alpha) * prev
+        }
+    })
 }
 
 pub fn cci(source: &Source, length: usize) -> f64 {
-    let ma = sma(source, length);
-
-    let mut iter = yield_map(source, |v| (v - ma).abs());
-    let mut sum = 0.0;
-    let mut count = 0;
-
-    while let Some(v) = iter.next() {
-        sum += v;
-        count += 1;
-
-        if count == length {
-            break;
-        }
-    }
-
-    if count < length {
+    if source.len() < length {
         return f64::NAN;
     }
 
+    let ma = sma(source, length);
+    let sum = yield_map(&source[..length], |v| (v - ma).abs()).sum::<f64>();
     (source - ma) / (0.015 * (sum / length as f64))
 }
 
@@ -150,13 +164,9 @@ pub fn macd(
     long_length: usize,
     dea_length: usize,
 ) -> (f64, f64, f64) {
-    let short_line = yield_map(source, |source| ema(source, short_length));
-    let long_line = yield_map(source, |source| ema(source, long_length));
-    let dif = short_line.zip(long_line).map(|v| v.0 - v.1);
-    let dea = ema(dif, dea_length);
-    let short_line = yield_map(source, |source| ema(source, short_length));
-    let long_line = yield_map(source, |source| ema(source, long_length));
-    let dif = short_line.zip(long_line).map(|v| v.0 - v.1).sum::<f64>();
+    let iter = yield_map(source, |v| ema(v, short_length) - ema(v, long_length));
+    let dif = ema(source, short_length) - ema(source, long_length);
+    let dea = ema_iter(iter, dea_length);
     let macd = (dif - dea) * 2.0;
     (dif, dea, macd)
 }
