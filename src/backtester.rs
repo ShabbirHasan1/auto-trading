@@ -156,11 +156,14 @@ pub struct MatchmakingEngine {
     /// 交易配置。
     config: Config,
 
+    /// 订单 id。
+    id: u64,
+
     /// 产品，相关数据。
-    product: std::collections::HashMap<String, PriceData>,
+    product: std::collections::BTreeMap<String, PriceData>,
 
     /// 仓位，开仓委托。
-    delegate: std::collections::HashMap<u64, Delegate>,
+    delegate: std::collections::BTreeMap<u64, Delegate>,
 
     /// 仓位，平仓委托。
     position: Vec<(Position, Vec<SubDelegate>)>,
@@ -174,8 +177,9 @@ impl MatchmakingEngine {
         Self {
             balance: value.initial_margin,
             config: value,
-            product: std::collections::HashMap::new(),
-            delegate: std::collections::HashMap::new(),
+            id: 0,
+            product: std::collections::BTreeMap::new(),
+            delegate: std::collections::BTreeMap::new(),
             position: Vec::new(),
             history: Vec::new(),
         }
@@ -452,13 +456,10 @@ impl MatchmakingEngine {
 
             self.balance -= margin + fee;
 
-            let id = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64;
+            self.id += 1;
 
             self.delegate.insert(
-                id,
+                self.id,
                 Delegate {
                     product: product.to_string(),
                     lever: self.config.lever,
@@ -473,7 +474,7 @@ impl MatchmakingEngine {
                 },
             );
 
-            return Ok(id);
+            return Ok(self.id);
         }
 
         if let Some(v) = self
@@ -514,13 +515,10 @@ impl MatchmakingEngine {
                 );
             };
 
-            let id = std::time::SystemTime::now()
-                .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64;
+            self.id += 1;
 
             self.delegate.insert(
-                id,
+                self.id,
                 Delegate {
                     product: product.to_string(),
                     lever: self.config.lever,
@@ -535,7 +533,7 @@ impl MatchmakingEngine {
                 },
             );
 
-            return Ok(id);
+            return Ok(self.id);
         }
 
         anyhow::bail!("no position: {}", product);
