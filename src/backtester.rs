@@ -116,6 +116,17 @@ where
                     )
                 },
                 cancel: &|value| me.borrow_mut().cancel(value),
+                position: &|product| {
+                    if product.is_empty() {
+                        me.borrow().position.get(0).map(|v| v.0.clone())
+                    } else {
+                        me.borrow()
+                            .position
+                            .iter()
+                            .find(|v| v.0.product == product)
+                            .map(|v| v.0.clone())
+                    }
+                },
                 new_context: &|product: &str, level: Level| {
                     todo!("貌似无解，策略闭包要不要改成异步的？")
                 },
@@ -213,7 +224,6 @@ impl MatchmakingEngine {
     /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
     /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
     /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
-    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
     ///

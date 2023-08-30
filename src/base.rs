@@ -552,6 +552,8 @@ pub struct Context<'a> {
 
     pub(crate) cancel: &'a dyn Fn(u64),
 
+    pub(crate) position: &'a dyn Fn(&str) -> Option<Position>,
+
     pub(crate) new_context: &'a dyn Fn(&str, Level) -> &'a Context,
 }
 
@@ -560,7 +562,6 @@ impl<'a> Context<'a> {
     /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
     /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
     /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
-    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
     ///
@@ -583,7 +584,6 @@ impl<'a> Context<'a> {
     /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
     /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
     /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
-    /// 开平仓模式和买卖模式都应该使用 [`Side::BuySell`] 和 [`Side::SellLong`] 进行平仓操作，这相当只减仓，而不会开新的仓位。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
     ///
@@ -629,6 +629,14 @@ impl<'a> Context<'a> {
     /// * `id` 订单 id。
     pub fn cancel(&self, id: u64) {
         (self.cancel)(id)
+    }
+
+    /// 获取仓位。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP，留空表示获取当前仓位。
+    /// * `return` 仓位。
+    pub fn position(&self, product: &str) -> Option<Position> {
+        (self.position)(product)
     }
 
     /// 创建新的上下文环境，继承当前的上下文变量表。

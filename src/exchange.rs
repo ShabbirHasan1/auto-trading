@@ -45,7 +45,7 @@ impl LocalExchange {
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
     /// * `k` k 线数据。
-    pub fn level_k<S>(&mut self, product: S, level: Level, k: Vec<K>) -> &mut Self
+    pub fn level_k<S>(mut self, product: S, level: Level, k: Vec<K>) -> Self
     where
         S: AsRef<str>,
     {
@@ -62,17 +62,17 @@ impl LocalExchange {
     /// 插入数据。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `min_unit` 单笔最小交易数量。
-    pub fn min_unit<S>(&mut self, product: S, min_unit: f64) -> &mut Self
+    /// * `unit` 面值。
+    pub fn unit<S>(mut self, product: S, unit: f64) -> Self
     where
         S: AsRef<str>,
     {
         if let Some(entry) = self.inner.get_mut(product.as_ref()) {
-            entry.1 = min_unit;
+            entry.1 = unit;
         } else {
             self.inner.insert(
                 product.as_ref().to_string(),
-                (std::collections::HashMap::new(), min_unit),
+                (std::collections::HashMap::new(), unit),
             );
         }
         self
