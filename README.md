@@ -5,7 +5,7 @@
 # 依赖本库
 
 ```rust
-auto-trading = "0.2.0"
+auto-trading = "0.3.0"
 ```
 或者 
 
