@@ -2,6 +2,17 @@
 
 一个通用的回测框架，支持欧易，币安平台。
 
+# 依赖本库
+
+```rust
+auto-trading = "0.2.0"
+```
+或者 
+
+```rust
+cargo add auto-trading
+```
+
 # 例子1
 
 ```rust
