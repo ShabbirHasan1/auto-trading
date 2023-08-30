@@ -110,7 +110,7 @@ pub fn sma(source: &Source, length: usize) -> f64 {
         return f64::NAN;
     }
 
-    source.iter().take(length).sum()
+    source.iter().take(length).sum::<f64>() / length as f64
 }
 
 pub fn ema(source: &Source, length: usize) -> f64 {
@@ -123,14 +123,6 @@ pub fn ema(source: &Source, length: usize) -> f64 {
             alpha * source + (1.0 - alpha) * prev
         }
     })
-
-    // yield_fold(source, |prev, source| {
-    //     if prev.is_nan() {
-    //         source[0]
-    //     } else {
-    //         alpha * source + (1.0 - alpha) * prev
-    //     }
-    // })
 }
 
 pub fn ema_iter<S>(source: S, length: usize) -> f64

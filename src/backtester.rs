@@ -115,7 +115,13 @@ where
                         stop_loss,
                     )
                 },
-                cancel: &|value| me.borrow_mut().cancel(value),
+                cancel: &|value| {
+                    if value == 0 {
+                        me.borrow_mut().delegate.clear();
+                    } else {
+                        me.borrow_mut().cancel(value);
+                    }
+                },
                 position: &|product| {
                     if product.is_empty() {
                         me.borrow().position.get(0).map(|v| v.0.clone())
