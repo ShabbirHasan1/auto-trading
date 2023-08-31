@@ -1,19 +1,17 @@
-# 这是什么？
+# Auto Trading
 
-一个通用的回测框架，支持欧易，币安平台。
+回测，策略，多平台，量化交易框架。
 
-# 依赖本库
+backtest, strategy, multiple platforms, quantitative trading framework.
 
-```rust
-auto-trading = "0.3.0"
+# Dependencies
+
 ```
-或者 
-
-```rust
-cargo add auto-trading
+[dependencies]
+auto-trading = "0.5.0"
 ```
 
-# 例子1
+# Examples 1
 
 ```rust
 use auto_trading::*;
@@ -68,7 +66,7 @@ async fn test1() {
 }
 ```
 
-# 例子2
+# Examples 2
 
 ```rust
 use auto_trading::*;
