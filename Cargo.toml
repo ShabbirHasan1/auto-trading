@@ -2,7 +2,7 @@
 name = "auto-trading"
 version = "0.4.0"
 edition = "2021"
-description = "backtest, strategy, quantitative trading framework"
+description = "backtest, strategy, multiple platforms, quantitative trading framework"
 license = "MIT"
 repository = "https://github.com/86maid/auto-trading"
 
