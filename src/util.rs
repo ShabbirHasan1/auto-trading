@@ -168,12 +168,10 @@ pub fn macd(
 /// * `value` 时间戳。
 /// * `return` 本地时间文本。
 pub fn time_to_string(value: u64) -> String {
-    let datetime: chrono::DateTime<chrono::Utc> = chrono::DateTime::from_utc(
-        chrono::NaiveDateTime::from_timestamp_millis(value as i64).unwrap(),
-        chrono::Utc,
-    );
-    let local_datetime: chrono::DateTime<chrono::Local> = datetime.into();
-    local_datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+    chrono::NaiveDateTime::from_timestamp_millis(value as i64)
+        .unwrap()
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
 }
 
 /// 获取指定范围的 k 线数据。
