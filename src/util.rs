@@ -141,7 +141,7 @@ where
 }
 
 pub fn rma(source: &Source, length: usize) -> f64 {
-    let alpha = 2.0 / (length + 1) as f64;
+    let alpha = 1.0 / length as f64;
 
     yield_nan(source, |prev, source| {
         if prev.is_nan() {
@@ -156,7 +156,7 @@ pub fn rma_iter<S>(source: S, length: usize) -> f64
 where
     S: IntoIterator<Item = f64>,
 {
-    let alpha = 2.0 / (length + 1) as f64;
+    let alpha = 1.0 / length as f64;
 
     yield_nan_iter(source, |prev, source| {
         if prev.is_nan() {
@@ -191,6 +191,8 @@ pub fn macd(
 }
 
 pub fn rsi(source: &Source, length: usize) -> f64 {
+    todo!("fuck you, what went wrong???");
+
     if source.len() < length {
         return f64::NAN;
     }
@@ -213,7 +215,7 @@ pub fn rsi(source: &Source, length: usize) -> f64 {
         }
     });
 
-    let rs = dbg!(rma_iter(u, length)) / dbg!(rma_iter(d, length));
+    let rs = rma_iter(u, length) / rma_iter(d, length);
 
     100.0 - 100.0 / (1.0 + rs)
 }
