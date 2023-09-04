@@ -140,6 +140,33 @@ where
     })
 }
 
+pub fn rma(source: &Source, length: usize) -> f64 {
+    let alpha = 2.0 / (length + 1) as f64;
+
+    yield_nan(source, |prev, source| {
+        if prev.is_nan() {
+            sma(source, length)
+        } else {
+            alpha * source + (1.0 - alpha) * prev
+        }
+    })
+}
+
+pub fn rma_iter<S>(source: S, length: usize) -> f64
+where
+    S: IntoIterator<Item = f64>,
+{
+    let alpha = 2.0 / (length + 1) as f64;
+
+    yield_nan_iter(source, |prev, source| {
+        if prev.is_nan() {
+            sma(source, length)
+        } else {
+            alpha * source + (1.0 - alpha) * prev
+        }
+    })
+}
+
 pub fn cci(source: &Source, length: usize) -> f64 {
     if source.len() < length {
         return f64::NAN;
@@ -163,15 +190,45 @@ pub fn macd(
     (dif, dea, macd)
 }
 
+pub fn rsi(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
+    let u = yield_map(source, |v| {
+        let temp = v - v[1];
+        if temp.is_nan() {
+            0.0
+        } else {
+            temp
+        }
+    });
+
+    let d = yield_map(source, |v| {
+        let temp = v[1] - v;
+        if temp.is_nan() {
+            0.0
+        } else {
+            temp
+        }
+    });
+
+    let rs = dbg!(rma_iter(u, length)) / dbg!(rma_iter(d, length));
+
+    100.0 - 100.0 / (1.0 + rs)
+}
+
 /// 时间戳转换到本地时间文本。
 ///
 /// * `value` 时间戳。
 /// * `return` 本地时间文本。
 pub fn time_to_string(value: u64) -> String {
-    chrono::NaiveDateTime::from_timestamp_millis(value as i64)
-        .unwrap()
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string()
+    chrono::TimeZone::from_utc_datetime(
+        &chrono::Local,
+        &chrono::NaiveDateTime::from_timestamp_millis(value as i64).unwrap(),
+    )
+    .format("%Y-%m-%d %H:%M:%S")
+    .to_string()
 }
 
 /// 获取指定范围的 k 线数据。
