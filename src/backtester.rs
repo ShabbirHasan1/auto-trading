@@ -116,11 +116,7 @@ where
                     )
                 },
                 cancel: &|value| {
-                    if value == 0 {
-                        me.borrow_mut().delegate.clear();
-                    } else {
-                        me.borrow_mut().cancel(value);
-                    }
+                    me.borrow_mut().cancel(value);
                 },
                 position: &|product| {
                     if product.is_empty() {
@@ -486,7 +482,7 @@ impl MatchmakingEngine {
             let price = if price == 0.0 { close } else { price };
 
             // 最小下单价值
-            let min_unit = unit * v.close_price;
+            let min_unit = unit * v.open_price;
 
             // 转换百分比
             let quantity = if quantity == 0.0 {
@@ -541,7 +537,11 @@ impl MatchmakingEngine {
 
     /// 取消订单。
     pub fn cancel(&mut self, value: u64) {
-        self.delegate.remove(&value);
+        if value == 0 {
+            self.delegate.clear()
+        } else {
+            self.delegate.remove(&value);
+        }
     }
 
     /// 更新。
@@ -756,6 +756,10 @@ impl MatchmakingEngine {
                 let (position, sub_delegate) = &mut self.position[i];
                 if position.product == product {
                     for i in (0..sub_delegate.len()).rev() {
+                        if position.quantity == 0.0 {
+                            break;
+                        }
+
                         let delegate = &sub_delegate[i];
 
                         if delegate.side == Side::BuySell
