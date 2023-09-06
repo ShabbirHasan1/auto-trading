@@ -106,15 +106,13 @@ impl std::fmt::Display for Level {
 /// 切片越界将返回 &[]。
 #[derive(Debug)]
 pub struct Source {
-    inner: [f64],
+    pub inner: [f64],
 }
 
 impl Source {
-    pub fn new<'a, T>(value: T) -> &'a Self
-    where
-        T: AsRef<[f64]>,
-    {
-        <&Self>::from(value)
+    pub fn new(value: &[f64]) -> &Self {
+        // 不要使用 AsRef
+        unsafe { std::mem::transmute(value) }
     }
 
     fn index<T>(&self, index: T) -> &Source
@@ -131,54 +129,11 @@ impl Source {
     }
 }
 
-impl<T> From<T> for &Source
-where
-    T: AsRef<[f64]>,
-{
-    fn from(value: T) -> Self {
-        unsafe { std::mem::transmute(value.as_ref()) }
-    }
-}
-
 impl std::ops::Deref for Source {
     type Target = [f64];
 
     fn deref(&self) -> &Self::Target {
         &self.inner
-    }
-}
-
-pub struct SourceIter<'a> {
-    inner: &'a Source,
-}
-
-impl<'a> SourceIter<'a> {
-    pub fn new(inner: &'a Source) -> Self {
-        Self { inner }
-    }
-}
-
-impl Iterator for SourceIter<'_> {
-    type Item = f64;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let result = self.inner[0];
-        if result.is_nan() {
-            None
-        } else {
-            self.inner = &self.inner[1..];
-            Some(result)
-        }
-    }
-}
-
-impl<'a> IntoIterator for &'a Source {
-    type Item = f64;
-
-    type IntoIter = SourceIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        SourceIter::new(self)
     }
 }
 

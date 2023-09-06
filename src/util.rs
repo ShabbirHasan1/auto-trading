@@ -1,84 +1,27 @@
+//! 可以使用递归的方式实现，但会导致栈溢出，所以全部使用 Vec 实现。
+
 use crate::*;
 
 pub fn yield_map<'a, F>(source: &'a Source, f: F) -> impl Iterator<Item = f64> + 'a
 where
     F: FnMut(&Source) -> f64 + 'a,
 {
-    source
-        .into_iter()
-        .enumerate()
-        .map(|v| &source[v.0..])
-        .map(f)
+    source.iter().enumerate().map(|v| &source[v.0..]).map(f)
 }
 
-pub fn yield_nan<'a, F>(source: &'a Source, mut f: F) -> f64
+pub fn yield_nan<F>(source: &Source, mut f: F) -> f64
 where
-    F: FnMut(f64, &Source) -> f64 + 'a,
+    F: FnMut(f64, &Source) -> f64,
 {
-    fn inner<'a, F>(source: &'a Source, f: &mut F) -> f64
-    where
-        F: FnMut(f64, &Source) -> f64 + 'a,
-    {
-        if source[1].is_nan() {
-            f(f64::NAN, source)
-        } else {
-            let prev = inner(&source[1..], f);
-            f(prev, source)
-        }
+    let mut result = f64::NAN;
+    let mut index = source.len();
+
+    while index != 0 {
+        index -= 1;
+        result = f(result, &source[index..]);
     }
 
-    inner(source, &mut f)
-}
-
-pub fn yield_nan_iter<'a, S, F>(source: S, mut f: F) -> f64
-where
-    S: IntoIterator<Item = f64>,
-    F: FnMut(f64, &Source) -> f64 + 'a,
-{
-    fn inner<'a, S, F>(iter: S, source: &'a Source, f: &mut F) -> f64
-    where
-        S: IntoIterator<Item = f64>,
-        F: FnMut(f64, &Source) -> f64 + 'a,
-    {
-        if source[1].is_nan() {
-            f(f64::NAN, source)
-        } else {
-            let mut iter = iter.into_iter();
-            let new = iter.next().unwrap_or(f64::NAN);
-            let array = [source[1], new];
-            let new_source = Source::new(array);
-            let prev = inner(iter, new_source, f);
-            f(prev, source)
-        }
-    }
-
-    let mut iter = source.into_iter();
-    let new = iter.next().unwrap_or(f64::NAN);
-    let prev = iter.next().unwrap_or(f64::NAN);
-    let array = [new, prev];
-    let new_source = Source::new(array);
-
-    inner(iter, new_source, &mut f)
-}
-
-pub fn yield_fold<'a, S, F>(source: S, mut f: F) -> f64
-where
-    S: IntoIterator<Item = f64>,
-    F: FnMut(f64, &Source) -> f64 + 'a,
-{
-    let mut source = source.into_iter();
-
-    let mut last = source.next().unwrap_or(f64::NAN);
-
-    loop {
-        let second = source.next().unwrap_or(f64::NAN);
-
-        if second.is_nan() {
-            return last;
-        }
-
-        last = f(last, Source::new([second, last]));
-    }
+    result
 }
 
 pub fn highest(source: &Source, length: usize) -> f64 {
@@ -86,11 +29,7 @@ pub fn highest(source: &Source, length: usize) -> f64 {
         return f64::NAN;
     }
 
-    source
-        .into_iter()
-        .take(3)
-        .max_by(|a, b| a.total_cmp(b))
-        .unwrap()
+    *source.iter().take(3).max_by(|a, b| a.total_cmp(b)).unwrap()
 }
 
 pub fn lowest(source: &Source, length: usize) -> f64 {
@@ -98,7 +37,7 @@ pub fn lowest(source: &Source, length: usize) -> f64 {
         return f64::NAN;
     }
 
-    source
+    *source
         .into_iter()
         .take(3)
         .max_by(|a, b| a.total_cmp(b))
@@ -125,40 +64,10 @@ pub fn ema(source: &Source, length: usize) -> f64 {
     })
 }
 
-pub fn ema_iter<S>(source: S, length: usize) -> f64
-where
-    S: IntoIterator<Item = f64>,
-{
-    let alpha = 2.0 / (length + 1) as f64;
-
-    yield_nan_iter(source, |prev, source| {
-        if prev.is_nan() {
-            source[0]
-        } else {
-            alpha * source + (1.0 - alpha) * prev
-        }
-    })
-}
-
 pub fn rma(source: &Source, length: usize) -> f64 {
     let alpha = 1.0 / length as f64;
 
     yield_nan(source, |prev, source| {
-        if prev.is_nan() {
-            sma(source, length)
-        } else {
-            alpha * source + (1.0 - alpha) * prev
-        }
-    })
-}
-
-pub fn rma_iter<S>(source: S, length: usize) -> f64
-where
-    S: IntoIterator<Item = f64>,
-{
-    let alpha = 1.0 / length as f64;
-
-    yield_nan_iter(source, |prev, source| {
         if prev.is_nan() {
             sma(source, length)
         } else {
@@ -183,39 +92,38 @@ pub fn macd(
     long_length: usize,
     dea_length: usize,
 ) -> (f64, f64, f64) {
-    let iter = yield_map(source, |v| ema(v, short_length) - ema(v, long_length));
     let dif = ema(source, short_length) - ema(source, long_length);
-    let dea = ema_iter(iter, dea_length);
+    let dea = ema(
+        Source::new(
+            &yield_map(source, |v| ema(v, short_length) - ema(v, long_length))
+                .collect::<Vec<f64>>(),
+        ),
+        dea_length,
+    );
     let macd = (dif - dea) * 2.0;
     (dif, dea, macd)
 }
 
 pub fn rsi(source: &Source, length: usize) -> f64 {
-    todo!("fuck you, what went wrong???");
-
     if source.len() < length {
         return f64::NAN;
     }
 
     let u = yield_map(source, |v| {
         let temp = v - v[1];
-        if temp.is_nan() {
-            0.0
-        } else {
-            temp
-        }
-    });
+        let temp = if temp.is_nan() { 0.0 } else { temp };
+        temp.max(0.0)
+    })
+    .collect::<Vec<f64>>();
 
     let d = yield_map(source, |v| {
         let temp = v[1] - v;
-        if temp.is_nan() {
-            0.0
-        } else {
-            temp
-        }
-    });
+        let temp = if temp.is_nan() { 0.0 } else { temp };
+        temp.max(0.0)
+    })
+    .collect::<Vec<f64>>();
 
-    let rs = rma_iter(u, length) / rma_iter(d, length);
+    let rs = rma(Source::new(&u), length) / rma(Source::new(&d), length);
 
     100.0 - 100.0 / (1.0 + rs)
 }
