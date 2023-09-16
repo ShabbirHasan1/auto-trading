@@ -236,29 +236,53 @@ impl PartialOrd for &Source {
 }
 
 overload::overload!((a: &Source) + (b: i64) -> f64 { a[0] + b as f64 });
+
 overload::overload!((a: &Source) - (b: i64) -> f64 { a[0] - b as f64 });
+
 overload::overload!((a: &Source) * (b: i64) -> f64 { a[0] * b as f64 });
+
 overload::overload!((a: &Source) / (b: i64) -> f64 { a[0] / b as f64 });
+
 overload::overload!((a: &Source) % (b: i64) -> f64 { a[0] % b as f64 });
+
 overload::overload!((a: &Source) + (b: f64) -> f64 { a[0] + b });
+
 overload::overload!((a: &Source) - (b: f64) -> f64 { a[0] - b });
+
 overload::overload!((a: &Source) * (b: f64) -> f64 { a[0] * b });
+
 overload::overload!((a: &Source) / (b: f64) -> f64 { a[0] / b });
+
 overload::overload!((a: &Source) % (b: f64) -> f64 { a[0] % b });
+
 overload::overload!((a: i64) + (b: &Source) -> f64 { a as f64 + b[0] });
+
 overload::overload!((a: i64) - (b: &Source) -> f64 { a as f64 - b[0] });
+
 overload::overload!((a: i64) * (b: &Source) -> f64 { a as f64 * b[0] });
+
 overload::overload!((a: i64) / (b: &Source) -> f64 { a as f64 / b[0] });
+
 overload::overload!((a: i64) % (b: &Source) -> f64 { a as f64 % b[0] });
+
 overload::overload!((a: f64) + (b: &Source) -> f64 { a + b[0] });
+
 overload::overload!((a: f64) - (b: &Source) -> f64 { a - b[0] });
+
 overload::overload!((a: f64) * (b: &Source) -> f64 { a * b[0] });
+
 overload::overload!((a: f64) / (b: &Source) -> f64 { a / b[0] });
+
 overload::overload!((a: f64) % (b: &Source) -> f64 { a % b[0] });
+
 overload::overload!((a: &Source) + (b: &Source) -> f64 { a[0] + b[0] });
+
 overload::overload!((a: &Source) - (b: &Source) -> f64 { a[0] - b[0] });
+
 overload::overload!((a: &Source) * (b: &Source) -> f64 { a[0] * b[0] });
+
 overload::overload!((a: &Source) / (b: &Source) -> f64 { a[0] / b[0] });
+
 overload::overload!((a: &Source) % (b: &Source) -> f64 { a[0] % b[0] });
 
 /// 时间范围。
@@ -331,7 +355,7 @@ impl From<std::ops::RangeToInclusive<u64>> for TimeRange {
     }
 }
 
-/// 订单方向。
+/// 委托方向。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     /// 买入开多。
@@ -347,69 +371,47 @@ pub enum Side {
     SellLong,
 }
 
-impl Side {
-    /// 获取用以计算多空仓位的乘数。
-    pub fn factor(&self) -> f64 {
-        match self {
-            Side::BuyLong => 1.0,
-            Side::SellShort => -1.0,
-            Side::BuySell => -1.0,
-            Side::SellLong => 1.0,
-        }
-    }
+// /// 委托。
+// #[derive(Debug, Clone)]
+// pub struct Delegate {
+//     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+//     pub product: String,
 
-    /// 获取仓位的反方向。
-    pub fn neg(&self) -> Side {
-        match self {
-            Side::BuyLong => Side::BuySell,
-            Side::SellShort => Side::SellLong,
-            Side::BuySell => Side::BuyLong,
-            Side::SellLong => Side::SellShort,
-        }
-    }
-}
+//     /// 杠杆。
+//     pub lever: u32,
 
-/// 委托。
-#[derive(Debug, Clone)]
-pub struct Delegate {
-    /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    pub product: String,
+//     /// 持仓方向。
+//     pub side: Side,
 
-    /// 杠杆。
-    pub lever: u32,
+//     /// 委托价格。
+//     pub price: f64,
 
+//     /// 委托数量。
+//     pub quantity: f64,
+
+//     /// 保证金。
+//     pub margin: f64,
+
+//     /// 止盈触发价。
+//     pub stop_profit_condition: f64,
+
+//     /// 止损触发价。
+//     pub stop_loss_condition: f64,
+
+//     /// 止盈委托价。
+//     pub stop_profit: f64,
+
+//     /// 止损委托价。
+//     pub stop_loss: f64,
+// }
+
+/// 交易记录。
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct Record {
     /// 持仓方向。
     pub side: Side,
 
-    /// 委托价格。
-    pub price: f64,
-
-    /// 委托数量。
-    pub quantity: f64,
-
-    /// 保证金。
-    pub margin: f64,
-
-    /// 止盈触发价。
-    pub stop_profit_condition: f64,
-
-    /// 止损触发价。
-    pub stop_loss_condition: f64,
-
-    /// 止盈委托价。
-    pub stop_profit: f64,
-
-    /// 止损委托价。
-    pub stop_loss: f64,
-}
-
-/// 清单仓位。
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SubPosition {
-    /// 持仓方向。
-    pub side: Side,
-
-    /// 均价。
+    /// 价格。
     pub price: f64,
 
     /// 持仓量。
@@ -473,8 +475,8 @@ pub struct Position {
     /// 平仓时间。
     pub close_time: u64,
 
-    /// 交易清单。
-    pub list: Vec<SubPosition>,
+    /// 交易记录。
+    pub log: Vec<Record>,
 }
 
 /// 上下文环境。
@@ -503,202 +505,223 @@ pub struct Context<'a> {
     /// 收盘价数据系列。
     pub close: &'a Source,
 
-    pub(crate) order: &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<u64>,
+    pub(crate) order:
+        &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<u64>,
 
-    pub(crate) cancel: &'a dyn Fn(u64),
+    pub(crate) cancel: &'a dyn Fn(u64) -> bool,
 
-    pub(crate) position: &'a dyn Fn(&str) -> Option<Position>,
-
-    pub(crate) new_context: &'a dyn Fn(&str, Level) -> &'a Context,
+    pub(crate) context: &'a dyn Fn(&str, Level) -> anyhow::Result<&'a Context>,
 }
 
 impl<'a> Context<'a> {
-    /// 下单。
-    /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
-    /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
-    /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
+    /// 委托。
+    /// 使用 [`Config::quantity`] 的委托数量。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
     ///
-    /// * `side` 订单方向。
+    /// * `side` 委托方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `return` 订单 id。
-    pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<u64> {
+    /// * `return` 委托 id。
+    pub fn order(&self, side: Side, price: f64) -> anyhow::Result<u64> {
         (self.order)(
             side,
             price,
-            0.into(),
-            0.into(),
-            0.into(),
-            0.into(),
-            0.into(),
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
         )
     }
 
-    /// 下单。
-    /// 如果做多限价大于当前价格，那么价格大于等于限价的时候才会成交。
-    /// 如果做空限价小于当前价格，那么价格小于等于限价的时候才会成交。
-    /// 如果策略在价格到达 [`Config`] 止盈止损目标位之前没有平仓操作，则仓位会进行平仓操作。
+    /// 委托。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
     /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
     /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
     ///
-    /// * `side` 订单方向。
+    /// * `side` 委托方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
-    /// * `quantity` 委托数量，如果是开仓，则 0 表示最小下单数量，[`Unit::Proportion`] 表示占用初始保证金的比例，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
     /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
     /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
-    /// * `stop_profit` 止盈委托价格，0 表示市价，其他表示限价。
-    /// * `stop_loss` 止损委托格，0 表示市价，其他表示限价。
-    /// * `return` 订单 id。
-    pub fn order_condition<A, B, C, D, E>(
-        &mut self,
+    /// * `stop_profit` 止盈委托价格，0 表示不设置，其他表示限价。
+    /// * `stop_loss` 止损委托格，0 表示不设置，其他表示限价。
+    /// * `return` 委托 id。
+    pub fn order_stop_profit_stop_loss(
+        &self,
         side: Side,
         price: f64,
-        quantity: A,
-        stop_profit_condition: B,
-        stop_loss_condition: C,
-        stop_profit: D,
-        stop_loss: E,
-    ) -> anyhow::Result<u64>
-    where
-        A: Into<Unit>,
-        B: Into<Unit>,
-        C: Into<Unit>,
-        D: Into<Unit>,
-        E: Into<Unit>,
-    {
+        stop_profit_condition: Unit,
+        stop_loss_condition: Unit,
+        stop_profit: Unit,
+        stop_loss: Unit,
+    ) -> anyhow::Result<u64> {
         (self.order)(
             side,
             price,
-            quantity.into(),
-            stop_profit_condition.into(),
-            stop_loss_condition.into(),
-            stop_profit.into(),
-            stop_loss.into(),
+            Unit::Zero,
+            Unit::Zero,
+            stop_profit_condition,
+            stop_loss_condition,
+            stop_profit,
+            stop_loss,
         )
     }
 
-    /// 撤销订单。
-    /// 对于已完成的订单，将撤销止盈止损委托，0 表示取消所有订单。
+    /// 委托。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
     ///
-    /// * `id` 订单 id。
-    pub fn cancel(&self, id: u64) {
+    /// * `side` 委托方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config::quantity`] 的设置，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `margin` 保证金，0 表示使用 [`Config::margin`] 的设置，保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]，超出仓位价值部分的保证金当作追加保证金。
+    /// * `return` 委托 id。
+    pub fn order_quantity_margin(
+        &self,
+        side: Side,
+        price: f64,
+        quantity: Unit,
+        margin: Unit,
+    ) -> anyhow::Result<u64> {
+        (self.order)(
+            side,
+            price,
+            quantity,
+            margin,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        )
+    }
+
+    /// 委托。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
+    ///
+    /// * `side` 委托方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config::quantity`] 的设置，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `margin` 保证金，0 表示使用 [`Config::margin`] 的设置，保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]，超出仓位价值部分的保证金当作追加保证金。
+    /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
+    /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
+    /// * `stop_profit` 止盈委托价格，0 表示不设置，其他表示限价。
+    /// * `stop_loss` 止损委托格，0 表示不设置，其他表示限价。
+    /// * `return` 委托 id。
+    pub fn order_condition(
+        &self,
+        side: Side,
+        price: f64,
+        quantity: Unit,
+        margin: Unit,
+        stop_profit_condition: Unit,
+        stop_loss_condition: Unit,
+        stop_profit: Unit,
+        stop_loss: Unit,
+    ) -> anyhow::Result<u64> {
+        (self.order)(
+            side,
+            price,
+            quantity,
+            margin,
+            stop_profit_condition,
+            stop_loss_condition,
+            stop_profit,
+            stop_loss,
+        )
+    }
+
+    /// 撤销委托。
+    /// 对于已成交的委托，将撤销止盈止损委托。
+    /// 0 表示取消所有委托。
+    ///
+    /// * `id` 委托 id。
+    pub fn cancel(&self, id: u64) -> bool {
         (self.cancel)(id)
     }
 
-    /// 获取仓位。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP，留空表示获取当前仓位。
-    /// * `return` 仓位。
-    pub fn position(&self, product: &str) -> Option<Position> {
-        (self.position)(product)
-    }
-
-    /// 创建新的上下文环境，继承当前的上下文变量表。
-    /// 如果要下单其他交易产品，则要将 [`crate::backtester::Backtester`] 中的 `other_product` 设置为 true，否则下单失败。
+    /// 获取其他交易产品的上下文环境。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
     /// * `return` 上下文环境。
-    pub fn new_context(&'a self, product: &'a str, level: Level) -> &Context {
-        (self.new_context)(product, level)
+    pub fn context(&self, product: &'a str, level: Level) -> anyhow::Result<&Context> {
+        (self.context)(product, level)
     }
 }
 
-/// 数量或比例。
+/// 张数，数量，比例
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Unit {
+    Zero,
+    Contract(u64),
     Quantity(f64),
     Proportion(f64),
 }
 
-impl Unit {
-    /// 转换到数量。
-    pub fn to_quantity(self, value: f64) -> f64 {
-        match self {
-            Self::Quantity(v) => v,
-            Self::Proportion(v) => v * value,
+impl std::cmp::PartialEq<u64> for Unit {
+    fn eq(&self, other: &u64) -> bool {
+        match (self, other) {
+            (Self::Zero, r0) => *r0 == 0,
+            (Self::Quantity(l0), r0) => *l0 == *r0 as f64,
+            (Self::Proportion(l0), r0) => *l0 == *r0 as f64,
+            (Self::Contract(l0), r0) => l0 == r0,
         }
-    }
-}
-
-impl From<&Source> for Unit {
-    fn from(value: &Source) -> Self {
-        value[0].into()
-    }
-}
-
-impl From<i8> for Unit {
-    fn from(value: i8) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<u8> for Unit {
-    fn from(value: u8) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<i16> for Unit {
-    fn from(value: i16) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<u16> for Unit {
-    fn from(value: u16) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<i32> for Unit {
-    fn from(value: i32) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<u32> for Unit {
-    fn from(value: u32) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<i64> for Unit {
-    fn from(value: i64) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<u64> for Unit {
-    fn from(value: u64) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<f32> for Unit {
-    fn from(value: f32) -> Self {
-        Self::Quantity(value as f64)
-    }
-}
-
-impl From<f64> for Unit {
-    fn from(value: f64) -> Self {
-        Self::Quantity(value)
     }
 }
 
 impl std::cmp::PartialEq<f64> for Unit {
     fn eq(&self, other: &f64) -> bool {
         match (self, other) {
+            (Self::Zero, r0) => *r0 == 0.0,
             (Self::Quantity(l0), r0) => l0 == r0,
             (Self::Proportion(l0), r0) => l0 == r0,
+            (Self::Contract(l0), r0) => *l0 as f64 == *r0,
         }
     }
 }
 
-/// 交易配置，参数可以不设置，这取决于你的策略。
-/// 如果策略需要下单，且没有设置 [`Config::initial_margin`]，则下单失败。
+/// 交易配置。
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
     pub initial_margin: f64,
@@ -707,9 +730,9 @@ pub struct Config {
     pub close_fee: f64,
     pub deviation: f64,
     pub maintenance: f64,
-    pub quantity: f64,
-    pub max_margin: f64,
+    pub quantity: Unit,
     pub margin: Unit,
+    pub max_margin: Unit,
 }
 
 impl Config {
@@ -721,11 +744,9 @@ impl Config {
             close_fee: 0.0,
             deviation: 0.0,
             maintenance: 0.0,
-            quantity: 0.0,
-            margin: 0.into(),
-            max_margin: 0.into(),
-            // stop_profit: 0.into(),
-            // stop_loss: 0.into(),
+            quantity: Unit::Zero,
+            margin: Unit::Zero,
+            max_margin: Unit::Zero,
         }
     }
 
@@ -759,36 +780,53 @@ impl Config {
         self
     }
 
-    /// 维持保证金率，即资金费率。
+    /// 维持保证金率。
     pub fn maintenance(mut self, value: f64) -> Self {
         self.maintenance = value;
         self
     }
 
-    /// 每次开仓的仓位价值占用的保证金数量，剩余的保证金当作追加保证金。
+    /// 每次开仓的仓位价值。
+    /// 默认为 1 张。
     ///
-    /// 如果 [`Config::margin`] 为 [`Unit::Quantity`]，则 0 表示仓位价值为 1 张，除此之外，仓位价值 = ([`Config::margin`] * [`Config::quantity`]) * 杠杆。
-    /// 如果 [`Config::margin`] 为 [`Unit::Proportion`]，则 0 表示仓位价值为 1 张，除此之外，仓位价值 = 策略开仓价值 * ([`Config::margin`] - [`Config::quantity`])。
-    pub fn quantity(mut self, value: f64) -> Self {
-        self.quantity = value;
-        self
-    }
-
-    /// 最大投入的保证金数量，超过后将开单失败。
-    pub fn max_margin(mut self, value: f64) -> Self {
-        self.max_margin = value;
+    /// * [`Unit::Contract`] 张数。
+    /// * [`Unit::Quantity`] 数量，例如 USDT。
+    /// * [`Unit::Proportion`] 占用初始化保证金的比例。
+    pub fn quantity<T>(mut self, value: T) -> Self
+    where
+        T: Into<Unit>,
+    {
+        self.quantity = value.into();
         self
     }
 
     /// 每次开仓投入的保证金。
+    /// 默认为 1 张。
+    /// 保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]。
+    /// 超出仓位价值部分的保证金当作追加保证金。
     ///
-    /// [`Unit::Quantity`] 表示固定保证金，需要配合 [`Config::quantity`] 使用。
-    /// [`Unit::Proportion`] 表示策略开仓价值的比例，需要配合 [`Config::quantity`] 使用。
+    /// * [`Unit::Contract`] 张数。
+    /// * [`Unit::Quantity`] 数量，例如 USDT。
+    /// * [`Unit::Proportion`] 占用初始化保证金的比例。
     pub fn margin<T>(mut self, value: T) -> Self
     where
         T: Into<Unit>,
     {
         self.margin = value.into();
+        self
+    }
+
+    /// 最大投入的保证金数量，超过后将开单失败。
+    /// 默认为 0，表示无限制。
+    ///
+    /// * [`Unit::Contract`] 张数，每个交易产品的最大持仓张数。
+    /// * [`Unit::Quantity`] 数量，例如 USDT。
+    /// * [`Unit::Proportion`] 占用初始化保证金的比例。
+    pub fn max_margin<T>(mut self, value: T) -> Self
+    where
+        T: Into<Unit>,
+    {
+        self.max_margin = value.into();
         self
     }
 }
