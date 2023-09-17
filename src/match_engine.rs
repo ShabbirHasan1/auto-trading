@@ -643,23 +643,24 @@ impl MatchEngine {
                 return;
             }
 
-            let current_delegate = delegate.as_mut().unwrap();
+            loop {
+                let current_delegate = delegate.as_mut().unwrap();
 
-            if !(current_delegate.side == Side::BuySell
-                && (current_delegate.condition >= 0.0 && k.high >= current_delegate.condition
-                    || current_delegate.condition <= 0.0
-                        && k.low <= current_delegate.condition.abs())
-                || current_delegate.side == Side::SellLong
+                if !(current_delegate.side == Side::BuySell
                     && (current_delegate.condition >= 0.0 && k.high >= current_delegate.condition
                         || current_delegate.condition <= 0.0
-                            && k.low <= current_delegate.condition.abs()))
-            {
-                return;
-            }
+                            && k.low <= current_delegate.condition.abs())
+                    || current_delegate.side == Side::SellLong
+                        && (current_delegate.condition >= 0.0
+                            && k.high >= current_delegate.condition
+                            || current_delegate.condition <= 0.0
+                                && k.low <= current_delegate.condition.abs()))
+                {
+                    return;
+                }
 
-            let current_position = position.as_mut().unwrap();
+                let current_position = position.as_mut().unwrap();
 
-            loop {
                 if current_delegate.condition.abs() == current_delegate.price {
                     // 限价触发，市价委托
                     let profit = (current_delegate.condition.abs() - current_position.open_price)
