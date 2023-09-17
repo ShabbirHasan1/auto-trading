@@ -371,40 +371,6 @@ pub enum Side {
     SellLong,
 }
 
-// /// 委托。
-// #[derive(Debug, Clone)]
-// pub struct Delegate {
-//     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-//     pub product: String,
-
-//     /// 杠杆。
-//     pub lever: u32,
-
-//     /// 持仓方向。
-//     pub side: Side,
-
-//     /// 委托价格。
-//     pub price: f64,
-
-//     /// 委托数量。
-//     pub quantity: f64,
-
-//     /// 保证金。
-//     pub margin: f64,
-
-//     /// 止盈触发价。
-//     pub stop_profit_condition: f64,
-
-//     /// 止损触发价。
-//     pub stop_loss_condition: f64,
-
-//     /// 止盈委托价。
-//     pub stop_profit: f64,
-
-//     /// 止损委托价。
-//     pub stop_loss: f64,
-// }
-
 /// 交易记录。
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Record {
@@ -516,6 +482,7 @@ pub struct Context<'a> {
 impl<'a> Context<'a> {
     /// 委托。
     /// 使用 [`Config::quantity`] 的委托数量。
+    /// 使用 [`Config::margin`] 的保证金数量。
     /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
     /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
     /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
@@ -699,28 +666,6 @@ pub enum Unit {
     Proportion(f64),
 }
 
-impl std::cmp::PartialEq<u64> for Unit {
-    fn eq(&self, other: &u64) -> bool {
-        match (self, other) {
-            (Self::Zero, r0) => *r0 == 0,
-            (Self::Quantity(l0), r0) => *l0 == *r0 as f64,
-            (Self::Proportion(l0), r0) => *l0 == *r0 as f64,
-            (Self::Contract(l0), r0) => l0 == r0,
-        }
-    }
-}
-
-impl std::cmp::PartialEq<f64> for Unit {
-    fn eq(&self, other: &f64) -> bool {
-        match (self, other) {
-            (Self::Zero, r0) => *r0 == 0.0,
-            (Self::Quantity(l0), r0) => l0 == r0,
-            (Self::Proportion(l0), r0) => l0 == r0,
-            (Self::Contract(l0), r0) => *l0 as f64 == *r0,
-        }
-    }
-}
-
 /// 交易配置。
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
@@ -792,26 +737,20 @@ impl Config {
     /// * [`Unit::Contract`] 张数。
     /// * [`Unit::Quantity`] 数量，例如 USDT。
     /// * [`Unit::Proportion`] 占用初始化保证金的比例。
-    pub fn quantity<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
+    pub fn quantity(mut self, value: Unit) -> Self {
         self.quantity = value.into();
         self
     }
 
     /// 每次开仓投入的保证金。
-    /// 默认为 1 张。
+    /// 默认为开仓所需的最低成本。
     /// 保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]。
     /// 超出仓位价值部分的保证金当作追加保证金。
     ///
     /// * [`Unit::Contract`] 张数。
     /// * [`Unit::Quantity`] 数量，例如 USDT。
     /// * [`Unit::Proportion`] 占用初始化保证金的比例。
-    pub fn margin<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
+    pub fn margin(mut self, value: Unit) -> Self {
         self.margin = value.into();
         self
     }
@@ -822,10 +761,7 @@ impl Config {
     /// * [`Unit::Contract`] 张数，每个交易产品的最大持仓张数。
     /// * [`Unit::Quantity`] 数量，例如 USDT。
     /// * [`Unit::Proportion`] 占用初始化保证金的比例。
-    pub fn max_margin<T>(mut self, value: T) -> Self
-    where
-        T: Into<Unit>,
-    {
+    pub fn max_margin(mut self, value: Unit) -> Self {
         self.max_margin = value.into();
         self
     }
