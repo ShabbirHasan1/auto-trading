@@ -639,6 +639,10 @@ impl MatchEngine {
                 return;
             }
 
+            if delegate.is_none() {
+                return;
+            }
+
             let current_delegate = delegate.as_mut().unwrap();
 
             if !(current_delegate.side == Side::BuySell
@@ -655,105 +659,117 @@ impl MatchEngine {
 
             let current_position = position.as_mut().unwrap();
 
-            if current_delegate.condition.abs() == current_delegate.price {
-                // 限价触发，市价委托
-                let profit = (current_delegate.condition.abs() - current_position.open_price)
-                    * current_delegate.quantity
-                    / current_position.open_price;
+            loop {
+                if current_delegate.condition.abs() == current_delegate.price {
+                    // 限价触发，市价委托
+                    let profit = (current_delegate.condition.abs() - current_position.open_price)
+                        * current_delegate.quantity
+                        / current_position.open_price;
 
-                let record = Record {
-                    side: current_delegate.side,
-                    price: current_delegate.condition.abs(),
-                    quantity: current_delegate.quantity,
-                    margin: current_delegate.margin,
-                    fee: current_delegate.quantity * self.config.close_fee,
-                    profit,
-                    profit_ratio: profit / current_delegate.margin,
-                    time: k.time,
-                };
-
-                self.balance += record.profit + record.margin - record.fee;
-
-                current_position.quantity -= record.quantity;
-
-                current_position.margin -= record.margin;
-
-                current_position.log.push(record);
-
-                if current_position.quantity == 0.0 {
-                    self.history
-                        .push(new_history_position(position.take().unwrap()));
-                }
-
-                *delegate = None;
-            } else {
-                // 限价触发，限价委托
-                if current_delegate.side == Side::BuySell
-                    && current_delegate.condition < current_delegate.price
-                {
-                    //                   C
-                    //          B        |
-                    // A        |        |
-                    // |        |        |
-                    // open  condition  price
-                    *current_delegate = Delegate {
+                    let record = Record {
                         side: current_delegate.side,
-                        condition: current_delegate.price,
-                        price: 0.0,
+                        price: current_delegate.condition.abs(),
                         quantity: current_delegate.quantity,
                         margin: current_delegate.margin,
+                        fee: current_delegate.quantity * self.config.close_fee,
+                        profit,
+                        profit_ratio: profit / current_delegate.margin,
+                        time: k.time,
                     };
-                }
 
-                if current_delegate.side == Side::BuySell
-                    && current_delegate.condition > current_delegate.price
-                {
-                    //
-                    //          B
-                    // A        |        C
-                    // |        |        |
-                    // open  condition  price
-                    *current_delegate = Delegate {
-                        side: current_delegate.side,
-                        condition: -current_delegate.price,
-                        price: 0.0,
-                        quantity: current_delegate.quantity,
-                        margin: current_delegate.margin,
-                    };
-                }
+                    self.balance += record.profit + record.margin - record.fee;
 
-                if current_delegate.side == Side::SellLong
-                    && current_delegate.condition > current_delegate.price
-                {
-                    // A
-                    // |        B
-                    // |        |        C
-                    // |        |        |
-                    // open  condition  price
-                    *current_delegate = Delegate {
-                        side: current_delegate.side,
-                        condition: -current_delegate.price,
-                        price: 0.0,
-                        quantity: current_delegate.quantity,
-                        margin: current_delegate.margin,
-                    };
-                }
+                    current_position.quantity -= record.quantity;
 
-                if current_delegate.side == Side::SellLong
-                    && current_delegate.condition < current_delegate.price
-                {
-                    // A                 C
-                    // |        B        |
-                    // |        |        |
-                    // |        |        |
-                    // open  condition  price
-                    *current_delegate = Delegate {
-                        side: current_delegate.side,
-                        condition: current_delegate.price,
-                        price: 0.0,
-                        quantity: current_delegate.quantity,
-                        margin: current_delegate.margin,
-                    };
+                    current_position.margin -= record.margin;
+
+                    current_position.log.push(record);
+
+                    if current_position.quantity == 0.0 {
+                        self.history
+                            .push(new_history_position(position.take().unwrap()));
+                    }
+
+                    *delegate = None;
+
+                    return;
+                } else {
+                    // 限价触发，限价委托
+                    if current_delegate.side == Side::BuySell
+                        && current_delegate.condition < current_delegate.price
+                    {
+                        //                   C
+                        //          B        |
+                        // A        |        |
+                        // |        |        |
+                        // open  condition  price
+                        *current_delegate = Delegate {
+                            side: current_delegate.side,
+                            condition: current_delegate.price,
+                            price: current_delegate.price,
+                            quantity: current_delegate.quantity,
+                            margin: current_delegate.margin,
+                        };
+
+                        continue;
+                    }
+
+                    if current_delegate.side == Side::BuySell
+                        && current_delegate.condition > current_delegate.price
+                    {
+                        //
+                        //          B
+                        // A        |        C
+                        // |        |        |
+                        // open  condition  price
+                        *current_delegate = Delegate {
+                            side: current_delegate.side,
+                            condition: -current_delegate.price,
+                            price: -current_delegate.price,
+                            quantity: current_delegate.quantity,
+                            margin: current_delegate.margin,
+                        };
+
+                        continue;
+                    }
+
+                    if current_delegate.side == Side::SellLong
+                        && current_delegate.condition > current_delegate.price
+                    {
+                        // A
+                        // |        B
+                        // |        |        C
+                        // |        |        |
+                        // open  condition  price
+                        *current_delegate = Delegate {
+                            side: current_delegate.side,
+                            condition: -current_delegate.price,
+                            price: -current_delegate.price,
+                            quantity: current_delegate.quantity,
+                            margin: current_delegate.margin,
+                        };
+
+                        continue;
+                    }
+
+                    if current_delegate.side == Side::SellLong
+                        && current_delegate.condition < current_delegate.price
+                    {
+                        // A                 C
+                        // |        B        |
+                        // |        |        |
+                        // |        |        |
+                        // open  condition  price
+                        *current_delegate = Delegate {
+                            side: current_delegate.side,
+                            condition: current_delegate.price,
+                            price: current_delegate.price,
+                            quantity: current_delegate.quantity,
+                            margin: current_delegate.margin,
+                        };
+
+                        continue;
+                    }
                 }
             }
         };
@@ -1601,5 +1617,197 @@ mod tests {
                 .floor()
                 == 20512.0
         );
+    }
+
+    #[test]
+    fn test_update3() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(10)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 5000.0,
+                close: 20000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            20000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Quantity(20100.0),
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        println!("{:?}", result);
+
+        println!("{:#?}", me);
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 20000.0,
+            },
+        );
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        assert!(me.history[0].close_price == 20100.0);
+    }
+
+    #[test]
+    fn test_update4() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(10)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 5000.0,
+                close: 20000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            20000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Quantity(19900.0),
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        println!("{:?}", result);
+
+        println!("{:#?}", me);
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 20000.0,
+            },
+        );
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        assert!(me.history[0].close_price == 19900.0);
+    }
+
+    #[test]
+    fn test_update5() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(10)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 5000.0,
+                close: 20000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            20000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Quantity(20100.0),
+            Unit::Zero,
+            Unit::Quantity(20200.0),
+            Unit::Zero,
+        );
+
+        println!("{:?}", result);
+
+        println!("{:#?}", me);
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 2,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 20000.0,
+            },
+        );
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        assert!(me.history[0].close_price == 20200.0);
     }
 }
