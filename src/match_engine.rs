@@ -54,6 +54,7 @@ pub struct Delegate {
 }
 
 /// 撮合引擎。
+/// 事件处理顺序：强平事件 -> 平仓委托 -> 开仓委托。
 #[derive(Debug)]
 pub struct MatchEngine {
     /// 余额。
@@ -132,6 +133,30 @@ impl MatchEngine {
             .k = k;
     }
 
+    /// 委托。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `side` 委托方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `quantity` 委托数量，如果是开仓，则 0 表示使用 [`Config::quantity`] 的设置，如果是平仓，则 0 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `margin` 保证金，0 表示使用 [`Config::margin`] 的设置，保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]，超出仓位价值部分的保证金当作追加保证金。
+    /// * `stop_profit_condition` 止盈触发价格，0 表示不设置，且 `stop_profit` 无效。
+    /// * `stop_loss_condition` 止损触发价格，0 表示不设置，且 `stop_loss` 无效。
+    /// * `stop_profit` 止盈委托价格，0 表示不设置，其他表示限价。
+    /// * `stop_loss` 止损委托格，0 表示不设置，其他表示限价。
+    /// * `return` 委托 id。
     pub fn order<S>(
         &mut self,
         product: S,
@@ -541,6 +566,9 @@ impl MatchEngine {
         anyhow::bail!("no position: {}", product);
     }
 
+    /// 取消委托。
+    ///
+    /// * `id` 委托 id。
     pub fn cancel(&mut self, id: u64) -> bool {
         if id == 0 {
             self.product.iter_mut().for_each(|v| v.1.delegate.clear());
@@ -549,7 +577,7 @@ impl MatchEngine {
 
         for i in self.product.iter_mut() {
             if let Some(v) = i.1.delegate.iter().position(|v| v.id == id) {
-                i.1.delegate.swap_remove(v);
+                i.1.delegate.remove(v);
                 return true;
             }
         }
@@ -557,6 +585,7 @@ impl MatchEngine {
         false
     }
 
+    /// 刷新。
     pub fn update(&mut self) {
         self.update_liquidation();
 
@@ -565,7 +594,7 @@ impl MatchEngine {
         self.update_open_delegate();
     }
 
-    pub fn update_liquidation(&mut self) {
+    fn update_liquidation(&mut self) {
         for (
             ..,
             Message {
@@ -631,21 +660,19 @@ impl MatchEngine {
         }
     }
 
-    pub fn update_close_delegate(&mut self) {
+    fn update_close_delegate(&mut self) {
         let mut handle = |k: &mut K,
                           delegate: &mut Option<Delegate>,
                           position: &mut Option<Position>| {
-            if position.is_none() {
+            if position.is_none() || delegate.is_none() {
                 return;
             }
 
-            if delegate.is_none() {
-                return;
-            }
+            let current_position = position.as_mut().unwrap();
+
+            let current_delegate = delegate.as_mut().unwrap();
 
             loop {
-                let current_delegate = delegate.as_mut().unwrap();
-
                 if !(current_delegate.side == Side::BuySell
                     && (current_delegate.condition >= 0.0 && k.high >= current_delegate.condition
                         || current_delegate.condition <= 0.0
@@ -658,8 +685,6 @@ impl MatchEngine {
                 {
                     return;
                 }
-
-                let current_position = position.as_mut().unwrap();
 
                 if current_delegate.condition.abs() == current_delegate.price {
                     // 限价触发，市价委托
@@ -785,25 +810,44 @@ impl MatchEngine {
             },
         ) in self.product.iter_mut()
         {
-            for i in (0..delegate.len()).rev() {
+            for i in 0..delegate.len() {
                 handle(k, &mut delegate[i].delegate1, position);
 
                 handle(k, &mut delegate[i].stop_profit_delegate, position);
 
                 handle(k, &mut delegate[i].stop_loss_delegate, position);
+            }
+
+            let mut i = 0;
+
+            // 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销
+            while i < delegate.len() {
+                if let Some(a) = delegate[i].delegate1 {
+                    if a.side == Side::BuySell || a.side == Side::SellLong {
+                        if let Some(b) = position {
+                            if a.quantity > b.quantity {
+                                delegate[i].delegate1 = None;
+                            }
+                        } else {
+                            delegate[i].delegate1 = None;
+                        }
+                    }
+                }
 
                 if delegate[i].delegate1.is_none()
                     && delegate[i].delegate2.is_none()
                     && delegate[i].stop_profit_delegate.is_none()
                     && delegate[i].stop_loss_delegate.is_none()
                 {
-                    delegate.swap_remove(i);
+                    delegate.remove(i);
+                } else {
+                    i += 1;
                 }
             }
         }
     }
 
-    pub fn update_open_delegate(&mut self) {
+    fn update_open_delegate(&mut self) {
         let handle = |product: &String,
                       k: &mut K,
                       delegate: &mut Option<Delegate>,
@@ -932,7 +976,9 @@ impl MatchEngine {
             },
         ) in self.product.iter_mut()
         {
-            for i in (0..delegate.len()).rev() {
+            let mut i = 0;
+
+            while i < delegate.len() {
                 if let Some(v) = delegate[i].delegate1 {
                     if v.side == Side::BuyLong || v.side == Side::SellShort {
                         handle(product, k, &mut delegate[i].delegate1, position);
@@ -946,7 +992,9 @@ impl MatchEngine {
                     && delegate[i].stop_profit_delegate.is_none()
                     && delegate[i].stop_loss_delegate.is_none()
                 {
-                    delegate.swap_remove(i);
+                    delegate.remove(i);
+                } else {
+                    i += 1;
                 }
             }
         }
@@ -1810,5 +1858,187 @@ mod tests {
         println!("{:#?}", me);
 
         assert!(me.history[0].close_price == 20200.0);
+    }
+
+    #[test]
+    fn test_update6() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(100)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 5000.0,
+                close: 20000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            25000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        println!("{:?}", result);
+
+        println!("{:#?}", me);
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 2,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 20000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuySell,
+            15200.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        me.update();
+
+        println!("{:?}", result);
+
+        println!("{:#?}", me);
+
+        assert!(me.history[0].close_price != 15200.0);
+    }
+
+    #[test]
+    fn test_update7() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(100)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 5000.0,
+                close: 20000.0,
+            },
+        );
+
+        me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            25000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        )
+        .unwrap();
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuySell,
+            50000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        println!("{:?}", result.unwrap_err());
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 2,
+                open: 30000.0,
+                high: 45000.0,
+                low: 20000.0,
+                close: 40000.0,
+            },
+        );
+
+        me.order(
+            "BTC-USDT-SWAP",
+            Side::BuySell,
+            50000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        )
+        .unwrap();
+
+        println!("{:#?}", me);
+
+        _ = me.order(
+            "BTC-USDT-SWAP",
+            Side::BuySell,
+            44000.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        me.update();
+
+        println!("{:#?}", me);
+
+        assert!(me.history[0].close_price == 44000.0);
+
+        assert!(me.product[0].1.delegate.is_empty());
     }
 }
