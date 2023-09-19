@@ -17,11 +17,20 @@ pub trait Exchange {
         S: AsRef<str>,
         S: Send;
 
-    /// 获取面值。
+    /// 获取最小下单数量。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `return` 面值，1张 = 价格 * 面值。
-    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    /// * `return` 单位为币。
+    async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: Send;
+
+    /// 获取最小名义价值。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `return` 单位为法币，返回 0 表示交易所没有规定。
+    async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send;
@@ -30,14 +39,12 @@ pub trait Exchange {
 /// 本地交易所。
 #[derive(Debug, Clone)]
 pub struct LocalExchange {
-    inner: std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>,
+    inner: Vec<(String, Level, Vec<K>, f64, f64)>,
 }
 
 impl LocalExchange {
     pub fn new() -> Self {
-        Self {
-            inner: std::collections::HashMap::new(),
-        }
+        Self { inner: Vec::new() }
     }
 
     /// 插入数据。
@@ -45,43 +52,32 @@ impl LocalExchange {
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
     /// * `k` k 线数据。
-    pub fn level_k<S>(mut self, product: S, level: Level, k: Vec<K>) -> Self
+    /// * `min_size` 最小下单数量。
+    /// * `min_notional` 最小名义价值。
+    pub fn push<S>(
+        mut self,
+        product: S,
+        level: Level,
+        k: Vec<K>,
+        min_size: f64,
+        min_notional: f64,
+    ) -> Self
     where
         S: AsRef<str>,
     {
-        let entry = self
-            .inner
-            .entry(product.as_ref().to_string())
-            .or_insert((std::collections::HashMap::new(), 0.0));
-        let (level_map, _) = entry;
-        let k_list = level_map.entry(level).or_insert(Vec::new());
-        k_list.extend(k);
-        self
-    }
-
-    /// 插入数据。
-    ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `unit` 面值。
-    pub fn unit<S>(mut self, product: S, unit: f64) -> Self
-    where
-        S: AsRef<str>,
-    {
-        if let Some(entry) = self.inner.get_mut(product.as_ref()) {
-            entry.1 = unit;
-        } else {
-            self.inner.insert(
-                product.as_ref().to_string(),
-                (std::collections::HashMap::new(), unit),
-            );
-        }
+        self.inner.push((
+            product.as_ref().to_string(),
+            level,
+            k,
+            min_size,
+            min_notional,
+        ));
         self
     }
 }
 
 impl std::ops::Deref for LocalExchange {
-    type Target =
-        std::collections::HashMap<String, (std::collections::HashMap<Level, Vec<K>>, f64)>;
+    type Target = Vec<(String, Level, Vec<K>, f64, f64)>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -101,46 +97,43 @@ impl Exchange for LocalExchange {
         S: AsRef<str>,
         S: Send,
     {
-        let product = product.as_ref().to_string();
+        let product = product.as_ref();
         self.inner
-            .get(&product)
-            .map(|v| &v.0)
-            .or_else(|| {
-                let product = product_mapping(&product);
-                self.inner.get(product.as_ref()).map(|v| &v.0)
+            .iter()
+            .find(|v| v.0 == product && v.1 == level)
+            .map(|v| {
+                v.2.iter()
+                    .filter(|v| time == 0 || v.time < time)
+                    .cloned()
+                    .collect()
             })
-            .ok_or_else(|| anyhow::anyhow!("product does not exist: {}", product))
-            .and_then(|v| {
-                v.get(&level)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("product does not exist: {}: {}", product, level)
-                    })
-                    .map(|v| {
-                        v.iter()
-                            .filter(|v| time == 0 || v.time < time)
-                            .cloned()
-                            .collect()
-                    })
-            })
+            .ok_or(anyhow::anyhow!("no product: {}", product))
     }
 
-    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
     {
         let product = product.as_ref();
         self.inner
-            .get(product)
-            .or_else(|| {
-                let product = product_mapping(&product);
-                self.inner.get(product.as_ref())
-            })
-            .ok_or(anyhow::anyhow!(
-                "product min unit does not exist: {}",
-                product
-            ))
-            .map(|v| v.1)
+            .iter()
+            .find(|v| v.0 == product)
+            .map(|v| v.3)
+            .ok_or(anyhow::anyhow!("no product: {}", product))
+    }
+
+    async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: Send,
+    {
+        let product = product.as_ref();
+        self.inner
+            .iter()
+            .find(|v| v.0 == product)
+            .map(|v| v.4)
+            .ok_or(anyhow::anyhow!("no product: {}", product))
     }
 }
 
@@ -299,7 +292,7 @@ impl Exchange for Okx {
         Ok(result)
     }
 
-    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
@@ -344,6 +337,15 @@ impl Exchange for Okx {
                 .parse::<f64>()?
         })
     }
+
+    async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: Send,
+    {
+        _ = product;
+        Ok(0.0)
+    }
 }
 
 /// 币安。
@@ -359,14 +361,14 @@ impl Binance {
             client: reqwest::ClientBuilder::new()
                 .timeout(std::time::Duration::from_secs(5))
                 .build()?,
-            base_url: "https://fapi.binance.com".to_string(),
+            base_url: "https://".to_string(),
         })
     }
 
     pub fn with_client(client: reqwest::Client) -> Self {
         Self {
             client,
-            base_url: "https://fapi.binance.com".to_string(),
+            base_url: "https://".to_string(),
         }
     }
 
@@ -418,21 +420,21 @@ impl crate::Exchange for Binance {
 
         let mut url = self.base_url.clone();
 
-        let args = if product.ends_with("SWAP") {
-            let product = &product[0..product.len() - 4];
+        let new_product = product.trim_end_matches("SWAP");
 
-            url += "/fapi/v1/continuousKlines";
+        let args = if product.ends_with("SWAP") {
+            url += "fapi.binance.com/fapi/v1/continuousKlines";
 
             if time == 0 {
                 serde_json::json!({
-                    "pair": product,
+                    "pair": new_product,
                     "interval": level,
                     "contractType": "PERPETUAL",
                     "limit": 1500
                 })
             } else {
                 serde_json::json!({
-                    "pair": product,
+                    "pair": new_product,
                     "interval": level,
                     "contractType": "PERPETUAL",
                     "endTime": time - 1,
@@ -440,17 +442,17 @@ impl crate::Exchange for Binance {
                 })
             }
         } else {
-            url += "/fapi/v1/klines";
+            url += "api.binance.com/api/v3/klines";
 
             if time == 0 {
                 serde_json::json!({
-                    "symbol": product,
+                    "symbol": new_product,
                     "interval": level,
                     "limit": 1500
                 })
             } else {
                 serde_json::json!({
-                    "symbol": product,
+                    "symbol": new_product,
                     "interval": level,
                     "endTime": time - 1,
                     "limit": 1500
@@ -500,12 +502,119 @@ impl crate::Exchange for Binance {
         Ok(result)
     }
 
-    async fn get_unit<S>(&self, product: S) -> anyhow::Result<f64>
+    async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>
     where
         S: AsRef<str>,
         S: Send,
     {
-        todo!("官方 api 返回的信息太多了，没看懂！");
+        let product = product.as_ref();
+
+        let product = if product.contains("-") {
+            product_mapping(product)
+        } else {
+            product.into()
+        };
+
+        let new_product = product.trim_end_matches("SWAP");
+
+        let url = self.base_url.clone()
+            + if product.ends_with("SWAP") {
+                "fapi.binance.com/fapi/v1/exchangeInfo"
+            } else {
+                "api.binance.com/api/v3/exchangeInfo"
+            }
+            + "?symbol="
+            + new_product;
+
+        let result = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+
+        result["symbols"]
+            .as_array()
+            .ok_or(anyhow::anyhow!(result.to_string()))?
+            .iter()
+            .find(|v| v["symbol"].as_str().unwrap() == new_product)
+            .map(|v| {
+                v["filters"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|v| v["filterType"] == "LOT_SIZE")
+                    .unwrap()["minQty"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<f64>()
+                    .unwrap()
+            })
+            .ok_or(anyhow::anyhow!("no product: {}", product))
+    }
+
+    async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
+    where
+        S: AsRef<str>,
+        S: Send,
+    {
+        let product = product.as_ref();
+
+        let product = if product.contains("-") {
+            product_mapping(product)
+        } else {
+            product.into()
+        };
+
+        let new_product = product.trim_end_matches("SWAP");
+
+        let url = self.base_url.clone()
+            + if product.ends_with("SWAP") {
+                "fapi.binance.com/fapi/v1/exchangeInfo"
+            } else {
+                "api.binance.com/api/v3/exchangeInfo"
+            }
+            + "?symbol="
+            + new_product;
+
+        let result = self
+            .client
+            .get(&url)
+            .send()
+            .await?
+            .json::<serde_json::Value>()
+            .await?;
+
+        result["symbols"]
+            .as_array()
+            .ok_or(anyhow::anyhow!(result.to_string()))?
+            .iter()
+            .find(|v| v["symbol"].as_str().unwrap() == new_product)
+            .map(|v| {
+                v["filters"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|v| {
+                        v["filterType"]
+                            == if product.ends_with("SWAP") {
+                                "MIN_NOTIONAL"
+                            } else {
+                                "NOTIONAL"
+                            }
+                    })
+                    .unwrap()[if product.ends_with("SWAP") {
+                    "notional"
+                } else {
+                    "minNotional"
+                }]
+                .as_str()
+                .unwrap()
+                .parse::<f64>()
+                .unwrap()
+            })
+            .ok_or(anyhow::anyhow!("no product: {}", product))
     }
 }
 
@@ -523,10 +632,12 @@ mod tests {
             .unwrap();
 
         let k2 = exchange
-            .get_k("BTC-USDT-SWAP", Level::Hour1, k1.last().unwrap().time)
+            .get_k("BTC-USDT", Level::Hour1, k1.last().unwrap().time)
             .await
             .unwrap();
 
+        println!("{}", k1[0].open);
+        println!("{}", k2[0].open);
         println!("{}", time_to_string(k1[0].time));
         println!("{}", time_to_string(k1.last().unwrap().time));
         println!("{}", time_to_string(k2[0].time));
@@ -536,11 +647,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn okx_get_min_unit() {
+    async fn okx_get_min_size() {
         let exchange = Okx::new().unwrap();
-        let x = exchange.get_unit("BTC-USDT-SWAP").await.unwrap();
+        let x = exchange.get_min_size("BTC-USDT-SWAP").await.unwrap();
         assert!(x == 0.01);
-        let x = exchange.get_unit("BTC-USDT").await.unwrap();
+        let x = exchange.get_min_size("BTC-USDT").await.unwrap();
         assert!(x == 0.00001);
     }
 
@@ -554,15 +665,35 @@ mod tests {
             .unwrap();
 
         let k2 = exchange
-            .get_k("BTC-USDT-SWAP", Level::Hour1, k1.last().unwrap().time)
+            .get_k("BTC-USDT", Level::Hour1, k1.last().unwrap().time)
             .await
             .unwrap();
 
+        println!("{}", k1[0].open);
+        println!("{}", k2[0].open);
         println!("{}", time_to_string(k1[0].time));
         println!("{}", time_to_string(k1.last().unwrap().time));
         println!("{}", time_to_string(k2[0].time));
         println!("{}", time_to_string(k2.last().unwrap().time));
 
         assert!(k1.last().unwrap().time != k2[0].time);
+    }
+
+    #[tokio::test]
+    async fn binance_get_min_size() {
+        let exchange = Binance::new().unwrap();
+        let x = exchange.get_min_size("BTC-USDT-SWAP").await.unwrap();
+        assert!(x == 0.001);
+        let x = exchange.get_min_size("BTC-USDT").await.unwrap();
+        assert!(x == 0.00001);
+    }
+
+    #[tokio::test]
+    async fn binance_get_min_notional() {
+        let exchange = Binance::new().unwrap();
+        let x = exchange.get_min_notional("BTC-USDT-SWAP").await.unwrap();
+        assert!(x == 5.0);
+        let x = exchange.get_min_notional("BTC-USDT").await.unwrap();
+        assert!(x == 5.0);
     }
 }
