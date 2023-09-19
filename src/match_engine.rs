@@ -3,8 +3,11 @@ use crate::*;
 /// 信息。
 #[derive(Debug)]
 struct Message {
-    /// 面值。
-    unit: f64,
+    /// 最小下单数量。
+    min_size: f64,
+
+    /// 最小名义价值。
+    min_notional: f64,
 
     /// K 线数据。
     k: K,
@@ -91,8 +94,9 @@ impl MatchEngine {
     /// 插入产品。
     ///
     /// * `product` 交易产品。
-    /// * `unit` 面值，1 张 = 价格 * 面值。
-    pub fn product<S>(&mut self, product: S, unit: f64)
+    /// * `min_size` 最小下单数量。
+    /// * `min_notional` 最小名义价值。
+    pub fn product<S>(&mut self, product: S, min_size: f64, min_notional: f64)
     where
         S: AsRef<str>,
     {
@@ -100,7 +104,8 @@ impl MatchEngine {
         self.product.push((
             product.to_string(),
             Message {
-                unit,
+                min_size,
+                min_notional,
                 k: K {
                     time: 114514,
                     open: 0.0,
@@ -175,7 +180,8 @@ impl MatchEngine {
         let product = product.as_ref();
 
         let Message {
-            unit,
+            min_size,
+            min_notional,
             k,
             delegate,
             position,
@@ -190,7 +196,7 @@ impl MatchEngine {
             let price = if price == 0.0 { k.close } else { price };
 
             // 1 张的价值
-            let min_unit = price * *unit;
+            let min_unit = price * *min_size;
 
             // 仓位价值
             let quantity = match if quantity == Unit::Zero {
@@ -204,6 +210,26 @@ impl MatchEngine {
                 Unit::Proportion(v) => self.config.initial_margin * v,
             };
 
+            // 开仓数量不能小于最小下单数量。
+            if quantity < min_unit {
+                anyhow::bail!(
+                    "product {}: open quantity < min size: {} < {}",
+                    product,
+                    quantity,
+                    min_unit
+                );
+            }
+
+            // 开仓价值不能小于最小名义价值
+            if quantity < *min_notional {
+                anyhow::bail!(
+                    "product {}: open quantity < min notional: {} < {}",
+                    product,
+                    quantity,
+                    min_notional
+                );
+            }
+
             // 投入的保证金
             let margin = match if margin == Unit::Zero {
                 self.config.margin
@@ -215,16 +241,6 @@ impl MatchEngine {
                 Unit::Quantity(v) => v,
                 Unit::Proportion(v) => self.config.initial_margin * v,
             };
-
-            // 开仓价值不能小于最小下单价值
-            if quantity < min_unit {
-                anyhow::bail!(
-                    "product {}: open quantity < min unit: {} < {}",
-                    product,
-                    quantity,
-                    min_unit
-                );
-            }
 
             // 保证金必须足够维持仓位价值
             if (margin * self.config.lever as f64) < quantity {
@@ -258,7 +274,7 @@ impl MatchEngine {
                         Unit::Zero => todo!("you are a big fool"),
                         Unit::Contract(v) => {
                             // 1 张相当的价值
-                            let min_unit = position.open_price * *unit;
+                            let min_unit = position.open_price * *min_size;
 
                             // 1 张相当的保证金
                             let min_margin = min_unit / self.config.lever as f64;
@@ -512,7 +528,7 @@ impl MatchEngine {
             let price = if price == 0.0 { k.close } else { price };
 
             // 最小下单价值
-            let min_unit = position.open_price * *unit;
+            let min_unit = position.open_price * *min_size;
 
             // 平仓量
             let quantity = match quantity {
@@ -1073,7 +1089,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1123,7 +1139,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1173,7 +1189,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1220,7 +1236,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1267,7 +1283,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1336,7 +1352,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1405,7 +1421,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1544,7 +1560,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1609,7 +1625,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1681,7 +1697,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1745,7 +1761,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1809,7 +1825,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1873,7 +1889,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
@@ -1951,7 +1967,7 @@ mod tests {
 
         let mut me = MatchEngine::new(config);
 
-        me.product("BTC-USDT-SWAP", 0.01);
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
 
         me.ready(
             "BTC-USDT-SWAP",
