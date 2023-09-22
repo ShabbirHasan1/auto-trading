@@ -141,6 +141,21 @@ pub fn time_to_string(value: u64) -> String {
     .to_string()
 }
 
+/// 本地时间文本转换到时间戳。
+///
+/// * `value` 本地时间文本。
+/// * `return` 时间戳。
+pub fn string_to_time<S>(value: S) -> u64
+where
+    S: AsRef<str>,
+{
+    chrono::TimeZone::from_utc_datetime(
+        &chrono::Local,
+        &chrono::NaiveDateTime::parse_from_str(value.as_ref(), "%Y-%m-%d %H:%M:%S").unwrap(),
+    )
+    .timestamp_millis() as u64
+}
+
 /// 获取指定范围的 k 线数据。
 /// 新的数据在前面。
 ///
@@ -160,6 +175,7 @@ where
     T: Into<TimeRange>,
 {
     let product = product.as_ref();
+
     let range = range.into();
 
     let mut result = Vec::new();
@@ -200,11 +216,90 @@ where
                         result.push(i);
                     }
                 }
+
                 break;
             }
 
             end = k.time;
             result.extend(v);
+        } else {
+            break;
+        }
+    }
+
+    Ok(result)
+}
+
+/// 获取指定范围的 k 线数据。
+/// 新的数据在前面。
+///
+/// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+/// * `level` 时间级别。
+/// * `range` 时间范围，0 表示获取所有数据，a..b 表示时间戳 a 到时间戳 b 范围之内的数据，
+/// * `millis` 延迟的毫秒数。
+/// * `return` K 线数组。
+pub async fn get_k_range_sleep<E, S, T>(
+    exchange: &E,
+    product: S,
+    level: Level,
+    range: T,
+    millis: u64,
+) -> anyhow::Result<Vec<K>>
+where
+    E: Exchange,
+    S: AsRef<str>,
+    T: Into<TimeRange>,
+{
+    let product = product.as_ref();
+
+    let range = range.into();
+
+    let mut result = Vec::new();
+
+    if range.start == 0 && range.end == 0 {
+        let mut time = 0;
+
+        loop {
+            let v = exchange.get_k(product, level, time).await?;
+
+            if let Some(k) = v.last() {
+                time = k.time;
+                result.extend(v);
+                tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+            } else {
+                break;
+            }
+        }
+
+        return Ok(result);
+    }
+
+    let mut end = range.end;
+
+    if end == u64::MAX - 1 {
+        end = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+    }
+
+    loop {
+        let v = exchange.get_k(product, level, end).await?;
+
+        if let Some(k) = v.last() {
+            if k.time < range.start {
+                for i in v {
+                    if i.time >= range.start {
+                        result.push(i);
+                    }
+                }
+
+                break;
+            }
+
+            end = k.time;
+            result.extend(v);
+            tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
         } else {
             break;
         }

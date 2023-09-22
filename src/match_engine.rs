@@ -87,6 +87,18 @@ impl MatchEngine {
         }
     }
 
+    pub fn position<S>(&self, product: S) -> Option<&Position>
+    where
+        S: AsRef<str>,
+    {
+        let product = product.as_ref();
+        self.product
+            .iter()
+            .find(|v| v.0 == product)
+            .map(|v| &v.1.position)
+            .and_then(|v| v.as_ref())
+    }
+
     pub fn history(&self) -> &Vec<Position> {
         &self.history
     }

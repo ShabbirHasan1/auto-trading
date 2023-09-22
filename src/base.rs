@@ -295,7 +295,7 @@ pub struct TimeRange {
 impl From<u64> for TimeRange {
     fn from(value: u64) -> Self {
         Self {
-            start: value,
+            start: 0,
             end: value,
         }
     }
@@ -450,11 +450,14 @@ pub struct Context<'a> {
     /// 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     pub product: &'a str,
 
+    /// 最小下单数量。
+    pub min_size: f64,
+
+    /// 最小名义价值。
+    pub min_notional: f64,
+
     /// 时间级别。
     pub level: Level,
-
-    /// 面值，1 张 = 价格 * 面值。
-    pub unit: f64,
 
     /// K 线的时间。
     pub time: u64,
@@ -476,7 +479,7 @@ pub struct Context<'a> {
 
     pub(crate) cancel: &'a dyn Fn(u64) -> bool,
 
-    pub(crate) context: &'a dyn Fn(&str, Level) -> anyhow::Result<&'a Context>,
+    pub(crate) position: &'a dyn Fn() -> Option<&'a Position>,
 }
 
 impl<'a> Context<'a> {
@@ -499,7 +502,7 @@ impl<'a> Context<'a> {
     /// * `side` 委托方向。
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `return` 委托 id。
-    pub fn order(&self, side: Side, price: f64) -> anyhow::Result<u64> {
+    pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<u64> {
         (self.order)(
             side,
             price,
@@ -534,7 +537,7 @@ impl<'a> Context<'a> {
     /// * `stop_loss` 止损委托格，0 表示不设置，其他表示限价。
     /// * `return` 委托 id。
     pub fn order_stop_profit_stop_loss(
-        &self,
+        &mut self,
         side: Side,
         price: f64,
         stop_profit_condition: Unit,
@@ -574,7 +577,7 @@ impl<'a> Context<'a> {
     /// * `margin` 保证金，0 表示使用 [`Config::margin`] 的设置，保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]，超出仓位价值部分的保证金当作追加保证金。
     /// * `return` 委托 id。
     pub fn order_quantity_margin(
-        &self,
+        &mut self,
         side: Side,
         price: f64,
         quantity: Unit,
@@ -616,7 +619,7 @@ impl<'a> Context<'a> {
     /// * `stop_loss` 止损委托格，0 表示不设置，其他表示限价。
     /// * `return` 委托 id。
     pub fn order_condition(
-        &self,
+        &mut self,
         side: Side,
         price: f64,
         quantity: Unit,
@@ -643,17 +646,15 @@ impl<'a> Context<'a> {
     /// 0 表示取消所有委托。
     ///
     /// * `id` 委托 id。
-    pub fn cancel(&self, id: u64) -> bool {
+    pub fn cancel(&mut self, id: u64) -> bool {
         (self.cancel)(id)
     }
 
-    /// 获取其他交易产品的上下文环境。
+    /// 获取仓位。
     ///
-    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `level` 时间级别。
-    /// * `return` 上下文环境。
-    pub fn context(&self, product: &'a str, level: Level) -> anyhow::Result<&Context> {
-        (self.context)(product, level)
+    /// * `id` 委托 id。
+    pub fn position(&self) -> Option<&Position> {
+        (self.position)()
     }
 }
 

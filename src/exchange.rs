@@ -1,5 +1,3 @@
-use chrono::Datelike;
-
 use crate::*;
 
 /// 交易所。
@@ -185,7 +183,7 @@ impl Exchange for Okx {
             product_mapping(product)
         };
 
-        let (level, unit) = match level {
+        let (level, millis) = match level {
             Level::Minute1 => ("1m", 60 * 1000),
             Level::Minute3 => ("3m", 3 * 60 * 1000),
             Level::Minute5 => ("5m", 5 * 60 * 1000),
@@ -202,19 +200,23 @@ impl Exchange for Okx {
             Level::Month1 => {
                 // 获取当前时间戳与月初时间戳的差值
                 let now = chrono::Utc::now();
-                let year = now.year();
-                let month = now.month();
-                let first_day_of_month =
-                    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, year, month, 1, 0, 0, 0)
-                        .unwrap();
-                let timestamp = first_day_of_month.timestamp_millis() as u64;
                 (
                     "1Mutc",
                     std::time::SystemTime::now()
                         .duration_since(std::time::SystemTime::UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as u64
-                        - timestamp,
+                        - chrono::TimeZone::with_ymd_and_hms(
+                            &chrono::Utc,
+                            chrono::Datelike::year(&now),
+                            chrono::Datelike::month(&now),
+                            1,
+                            0,
+                            0,
+                            0,
+                        )
+                        .unwrap()
+                        .timestamp_millis() as u64,
                 )
             }
         };
@@ -227,7 +229,7 @@ impl Exchange for Okx {
                 .unwrap()
                 .checked_sub(std::time::Duration::from_millis(time))
             {
-                v <= std::time::Duration::from_millis(unit)
+                v <= std::time::Duration::from_millis(millis)
             } else {
                 false
             }
