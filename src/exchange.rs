@@ -3,13 +3,12 @@ use crate::*;
 /// 交易所。
 #[async_trait::async_trait]
 pub trait Exchange {
-    /// 获取 K 线数据。
-    /// 新的数据在前面。
+    /// 获取 k 线数据。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
     /// * `time` 获取这个时间之前的数据，单位毫秒，0 表示获取最近的数据。
-    /// * `return` K 线数组。
+    /// * `return` k 线数组，新的数据在前面。
     async fn get_k<S>(&self, product: S, level: Level, time: u64) -> anyhow::Result<Vec<K>>
     where
         S: AsRef<str>,
@@ -105,7 +104,7 @@ impl Exchange for LocalExchange {
                     .cloned()
                     .collect()
             })
-            .ok_or(anyhow::anyhow!("no product: {}", product))
+            .ok_or(anyhow::anyhow!("no product: {} {}", product, level))
     }
 
     async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>

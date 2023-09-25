@@ -1,10 +1,10 @@
 use crate::*;
 use std::ops;
 
-/// K 线。
+/// k 线。
 #[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct K {
-    /// K 线的时间。
+    /// k 线的时间。
     pub time: u64,
 
     /// 开盘价。
@@ -459,7 +459,7 @@ pub struct Context<'a> {
     /// 时间级别。
     pub level: Level,
 
-    /// K 线的时间。
+    /// k 线的时间。
     pub time: u64,
 
     /// 开盘价数据系列。
@@ -474,12 +474,8 @@ pub struct Context<'a> {
     /// 收盘价数据系列。
     pub close: &'a Source,
 
-    pub(crate) order:
-        &'a dyn Fn(Side, f64, Unit, Unit, Unit, Unit, Unit, Unit) -> anyhow::Result<u64>,
-
-    pub(crate) cancel: &'a dyn Fn(u64) -> bool,
-
-    pub(crate) position: &'a dyn Fn() -> Option<&'a Position>,
+    /// 撮合引擎
+    pub(crate) me: *mut MatchEngine,
 }
 
 impl<'a> Context<'a> {
@@ -503,16 +499,19 @@ impl<'a> Context<'a> {
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `return` 委托 id。
     pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<u64> {
-        (self.order)(
-            side,
-            price,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-        )
+        unsafe {
+            self.me.as_mut().unwrap().order(
+                self.product,
+                side,
+                price,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+            )
+        }
     }
 
     /// 委托。
@@ -545,16 +544,19 @@ impl<'a> Context<'a> {
         stop_profit: Unit,
         stop_loss: Unit,
     ) -> anyhow::Result<u64> {
-        (self.order)(
-            side,
-            price,
-            Unit::Zero,
-            Unit::Zero,
-            stop_profit_condition,
-            stop_loss_condition,
-            stop_profit,
-            stop_loss,
-        )
+        unsafe {
+            self.me.as_mut().unwrap().order(
+                self.product,
+                side,
+                price,
+                Unit::Zero,
+                Unit::Zero,
+                stop_profit_condition,
+                stop_loss_condition,
+                stop_profit,
+                stop_loss,
+            )
+        }
     }
 
     /// 委托。
@@ -583,16 +585,19 @@ impl<'a> Context<'a> {
         quantity: Unit,
         margin: Unit,
     ) -> anyhow::Result<u64> {
-        (self.order)(
-            side,
-            price,
-            quantity,
-            margin,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-            Unit::Zero,
-        )
+        unsafe {
+            self.me.as_mut().unwrap().order(
+                self.product,
+                side,
+                price,
+                quantity,
+                margin,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+                Unit::Zero,
+            )
+        }
     }
 
     /// 委托。
@@ -629,16 +634,19 @@ impl<'a> Context<'a> {
         stop_profit: Unit,
         stop_loss: Unit,
     ) -> anyhow::Result<u64> {
-        (self.order)(
-            side,
-            price,
-            quantity,
-            margin,
-            stop_profit_condition,
-            stop_loss_condition,
-            stop_profit,
-            stop_loss,
-        )
+        unsafe {
+            self.me.as_mut().unwrap().order(
+                self.product,
+                side,
+                price,
+                quantity,
+                margin,
+                stop_profit_condition,
+                stop_loss_condition,
+                stop_profit,
+                stop_loss,
+            )
+        }
     }
 
     /// 撤销委托。
@@ -647,14 +655,14 @@ impl<'a> Context<'a> {
     ///
     /// * `id` 委托 id。
     pub fn cancel(&mut self, id: u64) -> bool {
-        (self.cancel)(id)
+        unsafe { self.me.as_mut().unwrap().cancel(id) }
     }
 
     /// 获取仓位。
     ///
     /// * `id` 委托 id。
     pub fn position(&self) -> Option<&Position> {
-        (self.position)()
+        unsafe { self.me.as_mut().unwrap().position(self.product) }
     }
 }
 

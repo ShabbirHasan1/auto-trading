@@ -157,12 +157,11 @@ where
 }
 
 /// 获取指定范围的 k 线数据。
-/// 新的数据在前面。
 ///
 /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
 /// * `level` 时间级别。
 /// * `range` 时间范围，0 表示获取所有数据，a..b 表示时间戳 a 到时间戳 b 范围之内的数据，
-/// * `return` K 线数组。
+/// * `return` k 线数组，新的数据在前面。
 pub async fn get_k_range<E, S, T>(
     exchange: &E,
     product: S,
@@ -231,13 +230,12 @@ where
 }
 
 /// 获取指定范围的 k 线数据。
-/// 新的数据在前面。
 ///
 /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
 /// * `level` 时间级别。
 /// * `range` 时间范围，0 表示获取所有数据，a..b 表示时间戳 a 到时间戳 b 范围之内的数据，
 /// * `millis` 延迟的毫秒数。
-/// * `return` K 线数组。
+/// * `return` k 线数组，新的数据在前面。
 pub async fn get_k_range_sleep<E, S, T>(
     exchange: &E,
     product: S,
@@ -306,6 +304,269 @@ where
     }
 
     Ok(result)
+}
+
+/// 将 k 线时间戳转换到另一个时间级别。
+///
+/// * `time` k 线时间戳。
+/// * `level` 要转换到的时间级别。
+/// * `return` 当前 k 线的时间戳，下一根 k 线的时间戳。
+pub fn k_time_convert(time: u64, level: Level) -> (u64, u64) {
+    match level {
+        Level::Minute1 => (time, time + 1000 * 60),
+        Level::Minute3 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(
+                    chrono::Timelike::hour(&start),
+                    chrono::Timelike::minute(&start) / 3 * 3,
+                    0,
+                )
+                .unwrap();
+            let end = start + chrono::Duration::minutes(3);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Minute5 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(
+                    chrono::Timelike::hour(&start),
+                    chrono::Timelike::minute(&start) / 5 * 5,
+                    0,
+                )
+                .unwrap();
+            let end = start + chrono::Duration::minutes(5);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Minute15 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(
+                    chrono::Timelike::hour(&start),
+                    chrono::Timelike::minute(&start) / 15 * 15,
+                    0,
+                )
+                .unwrap();
+            let end = start + chrono::Duration::minutes(15);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Minute30 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(
+                    chrono::Timelike::hour(&start),
+                    chrono::Timelike::minute(&start) / 30 * 30,
+                    0,
+                )
+                .unwrap();
+            let end = start + chrono::Duration::minutes(30);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Hour1 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(chrono::Timelike::hour(&start), 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::hours(1);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Hour2 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(chrono::Timelike::hour(&start) / 2 * 2, 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::hours(2);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Hour4 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(chrono::Timelike::hour(&start) / 4 * 4, 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::hours(4);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Hour6 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(chrono::Timelike::hour(&start) / 6 * 6, 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::hours(6);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Hour12 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = start
+                .date()
+                .and_hms_opt(chrono::Timelike::hour(&start) / 12 * 12, 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::hours(12);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Day1 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64)
+                .unwrap()
+                .date()
+                .and_hms_opt(0, 0, 0)
+                .unwrap();
+            let end = start + chrono::Days::new(1);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Day3 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64).unwrap();
+            let start = chrono::Datelike::with_day(
+                &start.date(),
+                chrono::Datelike::day(&start.date()) / 3 * 3 + 1,
+            )
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+            let end = start + chrono::Days::new(3);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Week1 => {
+            let start = chrono::NaiveDateTime::from_timestamp_millis(time as i64)
+                .unwrap()
+                .date()
+                .week(chrono::Weekday::Mon)
+                .first_day()
+                .and_hms_opt(0, 0, 0)
+                .unwrap();
+            let end = start + chrono::Duration::weeks(1);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+        Level::Month1 => {
+            let start = chrono::Datelike::with_day(
+                &chrono::NaiveDateTime::from_timestamp_millis(time as i64)
+                    .unwrap()
+                    .date(),
+                1,
+            )
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+            let end = start + chrono::Months::new(1);
+            (
+                start.timestamp_millis() as u64,
+                end.timestamp_millis() as u64,
+            )
+        }
+    }
+}
+
+/// 将 k 线数组转换到另一个时间级别。
+///
+/// * `array` k 线数组，新的数据在前面。
+/// * `level` 要转换到的时间级别，必须大于等于 k 线的时间级别。
+/// * `return` k 线数组，新的数据在前面。
+pub fn k_convert<T>(array: T, level: Level) -> Vec<K>
+where
+    T: AsRef<[K]>,
+{
+    let array = array.as_ref();
+
+    let mut result = Vec::new();
+
+    if array.is_empty() {
+        return result;
+    }
+
+    let mut i = array.len() - 1;
+
+    loop {
+        let k = array[i];
+
+        let (start, next_start) = k_time_convert(k.time, level);
+
+        let start_k = (&array[i..])
+            .iter()
+            .position(|v| v.time <= start)
+            .map(|v| (i + v, array[i + v]))
+            .unwrap_or((array.len() - 1, *array.last().unwrap()));
+
+        let next_start_k = (&array[..=i])
+            .iter()
+            .rev()
+            .enumerate()
+            .find(|v| v.1.time >= next_start)
+            .map(|v| (i - v.0, array[i - v.0]))
+            .unwrap_or((0, *array.first().unwrap()));
+
+        let end_k = next_start_k
+            .0
+            .checked_add(1)
+            .and_then(|v| array.get(v).map(|k| (v, k)))
+            .unwrap_or((next_start_k.0, &array[next_start_k.0]));
+
+        let mut k = K {
+            time: start_k.1.time,
+            open: start_k.1.open,
+            high: 0.0,
+            low: f64::MAX,
+            close: end_k.1.close,
+        };
+
+        array[end_k.0..=start_k.0].iter().for_each(|v| {
+            k.high = k.high.max(v.high);
+            k.low = k.low.min(v.low)
+        });
+
+        result.push(k);
+
+        i = next_start_k.0;
+
+        if start_k.0 == next_start_k.0 || i == 0 {
+            break;
+        }
+    }
+
+    result.reverse();
+
+    result
 }
 
 /// 交易产品映射。
@@ -837,5 +1098,238 @@ where
         })
     } else {
         std::borrow::Cow::Borrowed(result)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::*;
+
+    #[test]
+    fn test_k_convert1() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Minute1);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert2() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Minute3);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 3 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert3() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Minute5);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 5 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert4() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Minute15);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 15 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert5() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Minute30);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 30 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert6() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Hour1);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert7() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Hour2);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 2 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert8() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Hour4);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 4 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert9() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Hour6);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 6 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert10() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Hour12);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 12 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert11() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Day1);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 24 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert12() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Day3);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 24 * 3 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert13() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Week1);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        assert!(result[1].time - 1000 * 60 * 60 * 24 * 7 == result[2].time);
+    }
+
+    #[test]
+    fn test_k_convert14() {
+        let array =
+            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+
+        let x = std::time::SystemTime::now();
+
+        let result = k_convert(&array, Level::Month1);
+
+        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+
+        println!("{}", x.as_millis());
+
+        let temp = chrono::NaiveDateTime::from_timestamp_millis(result[1].time as i64).unwrap();
+
+        let next = temp - chrono::Months::new(1);
+
+        assert!(result[2].time == next.timestamp_millis() as u64);
     }
 }
