@@ -1,5 +1,10 @@
 # Auto Trading
 
+[<img alt="github" src="https://img.shields.io/badge/github-86maid/auto--trading- ?logo=github" height="20">](https://github.com/86maid/auto-trading)
+[![Latest version](https://img.shields.io/crates/v/auto-trading)](https://crates.io/crates/auto-trading)
+[![Documentation](https://docs.rs/auto-trading/badge.svg)](https://docs.rs/auto-trading)
+[![Apache](https://img.shields.io/badge/license-Apache-blue.svg)](https://github.com/86maid/auto-trading/blob/master/LICENSE)
+
 回测，策略，多平台，量化交易框架。
 
 backtest, strategy, multiple platforms, quantitative trading framework.
@@ -8,7 +13,7 @@ backtest, strategy, multiple platforms, quantitative trading framework.
 
 ```
 [dependencies]
-auto-trading = "0.7.0"
+auto-trading = "0.7.1"
 ```
 
 # Examples 1

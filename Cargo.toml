@@ -1,9 +1,9 @@
 [package]
 name = "auto-trading"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
 description = "backtest, strategy, multiple platforms, quantitative trading framework"
-license = "MIT"
+license = "Apache 2.0"
 repository = "https://github.com/86maid/auto-trading"
 
 [dependencies]

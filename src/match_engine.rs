@@ -1033,7 +1033,6 @@ impl MatchEngine {
     fn update_profit_loss(&mut self) {
         for (.., Message { k, position, .. }) in self.product.iter_mut() {
             if let Some(v) = position {
-                // 限价触发，市价委托
                 let profit = (k.close - v.open_price) * v.quantity / v.open_price;
                 v.profit = profit;
                 v.profit_ratio = profit / v.margin
