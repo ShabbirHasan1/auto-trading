@@ -8,115 +8,219 @@ backtest, strategy, multiple platforms, quantitative trading framework.
 
 ```
 [dependencies]
-auto-trading = "0.6.0"
+auto-trading = "0.7.0"
 ```
 
 # Examples 1
 
+使用欧易交易所进行回测。
+
+Perform backtesting using the Okx exchange.
+
+* `product`: BTC-USDT-SWAP  
+* `level`: Hour4  
+* `range`: 1692963462000..  
+* `buy`: cci(close, 20) <= -350
+* `sell`: cci(close, 20) >= 100
+
 ```rust
 use auto_trading::*;
 
 #[tokio::test]
-async fn test1() {
-    let mut flag = true;
-
-    let strategy = |cx: &mut Context| {
-        if cci(cx.close, 20) <= -100.0 {
-            let result = cx.order(Side::BuyLong, 0.0);
-            println!("做多 {} {} {:?}", time_to_string(cx.time), cx.close, result);
-            flag = false;
-        }
-
-        if cci(cx.close, 20) >= 100.0 {
-            let result = cx.order(Side::BuySell, 0.0);
-            println!("平多 {} {} {:?}", time_to_string(cx.time), cx.close, result);
-            flag = true;
-        }
-    };
-
+async fn test_1() {
     let exchange = Okx::new().unwrap();
 
     let config = Config::new()
         .initial_margin(1000.0)
+        .quantity(Unit::Contract(1))
+        .margin(Unit::Quantity(10.0))
+        .lever(100)
         .open_fee(0.0002)
         .close_fee(0.0005)
-        .maintenance(0.004)
-        .lever(100)
-        // 保证金为策略开仓价值的 3 倍，策略默认开仓价值为 1 张
-        .margin(Unit::Proportion(3.0));
+        .maintenance(0.004);
 
-    let bt = Backtester::new(exchange, config);
+    let backtester = Backtester::new(exchange, config);
 
-    // 时间范围
-    // 0 和 .. 表示全部
-    // a.. 和 ..b 和 a..b 表示范围
-    let result = bt
+    let result = backtester
         .start(
-            strategy,
+            |cx| {
+                if cx.position().is_none() {
+                    if cci(cx.close, 20) <= -350.0 {
+                        let result = cx.order(Side::BuyLong, 0.0);
+                        println!(
+                            "开仓委托结果 {} {} {:?}",
+                            time_to_string(cx.time),
+                            cx.close,
+                            result
+                        );
+                    }
+                } else {
+                    if cci(cx.close, 20) >= 100.0 {
+                        let result = cx.order(Side::BuySell, 0.0);
+                        println!(
+                            "平仓委托结果 {} {} {:?}",
+                            time_to_string(cx.time),
+                            cx.close,
+                            result
+                        );
+                    }
+                }
+            },
             "BTC-USDT-SWAP",
             Level::Hour4,
-            1659539044000..1691075044000,
+            1692963462000..,
         )
         .await
         .unwrap();
 
-    println!("历史仓位\n{:#?}", result);
-
-    println!("盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
+    println!("历史仓位 {:#?}", result);
+    println!("所有盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
 }
 ```
 
+使用币安交易所只需要做简单的修改。
+
+Making modifications to use the Binance exchange is a straightforward process.
+
+```rust
+let exchange = Binance::new().unwrap();
+```
+
+使用本地交易所，从文件获取读取 k 线数据。
+
+Using a local exchange, retrieve candlestick (k-line) data from a file.
+
+```rust
+let exchange = LocalExchange::new().push(
+    "BTC-USDT-SWAP",
+    Level::Hour4,
+    serde_json::from_str(include_str!("BTC-USDT-SWAP-4h.json")).unwrap(),
+    0.01,
+    0.0,
+);
+```
+
+更多的委托参数。
+
+More delegate parameters.
+
+```rust
+cx.order_condition(
+    side,
+    price,
+    quantity,
+    margin,
+    stop_profit_condition,
+    stop_loss_condition,
+    stop_profit,
+    stop_loss,
+);
+```
+
 # Examples 2
+
+使用 1 分钟时间级别的 k 线数据在 4 小时的策略上回测，你的强平，平仓，开仓，盈亏会按照 1 分钟的时间级别刷新，而策略的调用周期为 4 小时。
+
+Backtesting a 4-hour strategy using 1-minute candlestick data means that your liquidation, closing, opening, and profit/loss calculations will refresh at the 1-minute time interval, while the strategy's invocation period is set at 4 hours.
 
 ```rust
 use auto_trading::*;
 
 #[tokio::test]
-async fn test2() {
-    let strategy = |cx: &mut Context| {
-        if cx.position("").is_none() && cci(cx.close, 20) <= -100.0 {
-            let result =
-                cx.order_condition(Side::BuyLong, 0.0, 0, cx.close + 300, cx.close - 200, 0, 0);
-            println!("做多 {} {} {:?}", time_to_string(cx.time), cx.close, result);
-        }
-    };
+async fn test_2() {
+    // 使用 1 分钟的 k 线数据。
+    let exchange = LocalExchange::new().push(
+        "BTC-USDT-SWAP",
+        Level::Minute1,
+        serde_json::from_str(include_str!("BTC-USDT-SWAP-1m.json")).unwrap(),
+        0.01,
+        0.0,
+    );
 
-    // 本地交易所
-    let exchange = LocalExchange::new()
-        .level_k(
+    // Level::Minute1 -> Level::Hour4
+    Backtester::new(exchange, Config::new())
+        .start_convert(
+            |cx| println!("{} {}", cx.time, time_to_string(cx.time)),
             "BTC-USDT-SWAP",
+            Level::Minute1,
             Level::Hour4,
-            serde_json::from_slice::<Vec<K>>(&std::fs::read("BTC-USDT-SWAP.json").unwrap())
-                .unwrap(),
-        )
-        .unit("BTC-USDT-SWAP", 0.01);
-
-    let config = Config::new()
-        .initial_margin(1000.0)
-        .open_fee(0.0002)
-        .close_fee(0.0005)
-        .maintenance(0.004)
-        .lever(100)
-        // 保证金为策略开仓价值的 3 倍，策略默认开仓价值为 1 张
-        .margin(Unit::Proportion(3.0));
-
-    let bt = Backtester::new(exchange, config);
-
-    // 时间范围
-    // 0 和 .. 表示全部
-    // a.. 和 ..b 和 a..b 表示范围
-    let result = bt
-        .start(
-            strategy,
-            "BTC-USDT-SWAP",
-            Level::Hour4,
-            1659539044000..1691075044000,
+            0,
         )
         .await
         .unwrap();
-
-    println!("历史仓位\n{:#?}", result);
-
-    println!("盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
 }
+```
+
+# Built-in Functions
+
+在 `auto_trading::util` 内置了 highest, lowest, sma, ema, rma, cci, macd 等其他函数。
+
+In `auto_trading::util`, there are other built-in functions such as highest, lowest, sma, ema, rma, cci, macd, and more.
+
+```rust
+use auto_trading::*;
+
+#[tokio::test]
+async fn test_3() {
+    println!("{}", time_to_string(1145141919810));
+
+    println!("{}", string_to_time("2006-04-16 06:58:39"));
+
+    println!(
+        "{:?}",
+        get_k_range(
+            &Okx::new().unwrap(),
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            1695212739000..1695644739000
+        )
+        .await
+        .unwrap()
+    );
+}
+```
+
+# Data series
+
+策略的 cx.open, cx.high, cx.low, cx.close 的数据类型为 `auto_trading::base::Source`，它不会因为越界而发生 panic。
+
+The data types for `cx.open`, `cx.high`, `cx.low`, and `cx.close` in the strategy are `auto_trading::base::Source`, and they won't panic due to index out of bounds errors.
+
+```rust
+#[test]
+fn test_4() {
+    let array = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let source = Source::new(&array);
+    assert!(source == 1.0);
+    assert!(source[2] == 3.0);
+    assert!(source[10].is_nan());
+    assert!((&source[1..4]) == &[2.0, 3.0, 4.0][..]);
+    assert!((&source[10..]).len() == 0);
+}
+```
+
+# Architecture
+
+* `exchange` 交易所。
+* `config` 交易配置。
+* `backtester` 回测器。
+* `match engine` 撮合引擎。
+* `strategy` 策略。
+
+```
+                                          +========+
+                                          | config |
+                                          +========+
+                                              ||
+                                              ||
++================+                            vv
+| okx            |     +==========+     +============+     +==========+
+| binance        | --> | exchange | --> | backtester | <-- | strategy |
+| local exchange |     +==========+     +============+     +==========+
++================+                            ^|
+                                              ||
+                                              |v
+                                       +==============+
+                                       | match engine |
+                                       +==============+
 ```

@@ -201,13 +201,19 @@ impl std::ops::Index<std::ops::RangeToInclusive<usize>> for Source {
 
 impl PartialEq<i64> for &Source {
     fn eq(&self, other: &i64) -> bool {
-        self == other
+        &self.inner[0] == &(*other as f64)
     }
 }
 
 impl PartialEq<f64> for &Source {
     fn eq(&self, other: &f64) -> bool {
-        self == other
+        &self.inner[0] == other
+    }
+}
+
+impl PartialEq<[f64]> for Source {
+    fn eq(&self, other: &[f64]) -> bool {
+        &self.inner == other
     }
 }
 
@@ -226,6 +232,12 @@ impl PartialOrd<i64> for &Source {
 impl PartialOrd<f64> for &Source {
     fn partial_cmp(&self, other: &f64) -> Option<std::cmp::Ordering> {
         self[0].partial_cmp(other)
+    }
+}
+
+impl PartialOrd<[f64]> for Source {
+    fn partial_cmp(&self, other: &[f64]) -> Option<std::cmp::Ordering> {
+        self.inner.partial_cmp(other)
     }
 }
 
@@ -670,8 +682,14 @@ impl<'a> Context<'a> {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Unit {
     Zero,
+
+    /// 张。
     Contract(u64),
+
+    /// 数量。
     Quantity(f64),
+
+    /// 比例。
     Proportion(f64),
 }
 

@@ -620,6 +620,8 @@ impl MatchEngine {
         self.update_close_delegate();
 
         self.update_open_delegate();
+
+        self.update_profit_loss();
     }
 
     fn update_liquidation(&mut self) {
@@ -1024,6 +1026,17 @@ impl MatchEngine {
                 } else {
                     i += 1;
                 }
+            }
+        }
+    }
+
+    fn update_profit_loss(&mut self) {
+        for (.., Message { k, position, .. }) in self.product.iter_mut() {
+            if let Some(v) = position {
+                // 限价触发，市价委托
+                let profit = (k.close - v.open_price) * v.quantity / v.open_price;
+                v.profit = profit;
+                v.profit_ratio = profit / v.margin
             }
         }
     }
@@ -2068,5 +2081,109 @@ mod tests {
         assert!(me.history[0].close_price == 44000.0);
 
         assert!(me.product[0].1.delegate.is_empty());
+    }
+
+    #[test]
+    fn test_update8() {
+        let config = Config::new()
+            .initial_margin(1000.0)
+            .quantity(Unit::Contract(1))
+            .margin(Unit::Quantity(100.0))
+            .lever(100)
+            .open_fee(0.0002)
+            .close_fee(0.0005)
+            .maintenance(0.004);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 20000.0,
+            },
+        );
+
+        me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            0.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        )
+        .unwrap();
+
+        me.update();
+
+        assert!(me.product[0].1.position.as_ref().unwrap().profit == 0.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 21000.0,
+            },
+        );
+
+        me.update();
+
+        assert!(me.product[0].1.position.as_ref().unwrap().profit == 10.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 22000.0,
+            },
+        );
+
+        me.update();
+
+        assert!(me.product[0].1.position.as_ref().unwrap().profit == 20.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 23000.0,
+            },
+        );
+
+        me.update();
+
+        assert!(me.product[0].1.position.as_ref().unwrap().profit == 30.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 1,
+                open: 10000.0,
+                high: 25000.0,
+                low: 15000.0,
+                close: 24000.0,
+            },
+        );
+
+        me.update();
+
+        assert!(me.product[0].1.position.as_ref().unwrap().profit == 40.0);
     }
 }

@@ -22,7 +22,7 @@ where
     ///
     /// * `strategy` 策略。
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
-    /// * `strategy_level` 策略的时间级别，即调用策略函数的时间周期。
+    /// * `strategy_level` 策略的时间级别，即调用策略的时间周期。
     /// * `range` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
     /// * `return` 回测结果。
     pub async fn start<F, S, I>(
@@ -33,7 +33,7 @@ where
         range: I,
     ) -> anyhow::Result<Vec<Position>>
     where
-        F: FnMut(&Context),
+        F: FnMut(&mut Context),
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
@@ -48,7 +48,7 @@ where
     /// * `strategy` 策略。
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `k_level` k 线的时间级别，撮合引擎会以 k 线的时间级别来处理盈亏，强平，委托。
-    /// * `strategy_level` 策略的时间级别，即调用策略函数的时间周期，必须大于等于 k 线的时间级别。
+    /// * `strategy_level` 策略的时间级别，即调用策略的时间周期，必须大于等于 k 线的时间级别。
     /// * `range` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
     /// * `return` 回测结果。
     pub async fn start_convert<F, S, I>(
@@ -60,7 +60,7 @@ where
         range: I,
     ) -> anyhow::Result<Vec<Position>>
     where
-        F: FnMut(&Context),
+        F: FnMut(&mut Context),
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
@@ -102,7 +102,7 @@ where
                     let high = Source::new(&high[strategy_index..]);
                     let low = Source::new(&low[strategy_index..]);
                     let close = Source::new(&close[strategy_index..]);
-                    let cx = Context {
+                    let mut cx = Context {
                         product,
                         min_size,
                         min_notional,
@@ -115,7 +115,7 @@ where
                         me: &mut me as *mut MatchEngine,
                     };
 
-                    strategy(&cx);
+                    strategy(&mut cx);
                     me.update();
                     if k_index == 0 {
                         break 'a;
@@ -163,7 +163,7 @@ mod tests {
 
         let backtester = Backtester::new(exchange, config);
 
-        let strategy = |cx: &Context| {
+        let strategy = |cx: &mut Context| {
             println!(
                 "{} {} {} {} {} {}",
                 cx.time,
@@ -205,7 +205,7 @@ mod tests {
 
         let backtester = Backtester::new(exchange, config);
 
-        let strategy = |cx: &Context| {
+        let strategy = |cx: &mut Context| {
             println!(
                 "{} {} {} {} {} {}",
                 cx.time,
@@ -247,7 +247,7 @@ mod tests {
 
         let backtester = Backtester::new(exchange, config);
 
-        let strategy = |cx: &Context| {
+        let strategy = |cx: &mut Context| {
             println!(
                 "{} {} {} {} {} {}",
                 cx.time,
@@ -289,7 +289,7 @@ mod tests {
 
         let backtester = Backtester::new(exchange, config);
 
-        let strategy = |cx: &Context| {
+        let strategy = |cx: &mut Context| {
             println!(
                 "{} {} {} {} {} {}",
                 cx.time,
