@@ -732,9 +732,15 @@ impl MatchEngine {
 
                 if current_delegate.condition.abs() == current_delegate.price {
                     // 限价触发，市价委托
-                    let profit = (current_delegate.condition.abs() - current_position.open_price)
-                        * current_delegate.quantity
-                        / current_position.open_price;
+                    let profit = if current_position.side == Side::BuyLong {
+                        (current_delegate.condition.abs() - current_position.open_price)
+                            * current_delegate.quantity
+                            / current_position.open_price
+                    } else {
+                        (current_position.open_price - current_delegate.condition.abs())
+                            * current_delegate.quantity
+                            / current_position.open_price
+                    };
 
                     let record = Record {
                         side: current_delegate.side,
@@ -1047,7 +1053,11 @@ impl MatchEngine {
     fn update_profit_loss(&mut self) {
         for (.., Message { k, position, .. }) in self.product.iter_mut() {
             if let Some(v) = position {
-                let profit = (k.close - v.open_price) * v.quantity / v.open_price;
+                let profit = if v.side == Side::BuyLong {
+                    (k.close - v.open_price) * v.quantity / v.open_price
+                } else {
+                    (v.open_price - k.close) * v.quantity / v.open_price
+                };
                 v.profit = profit;
                 v.profit_ratio = profit / v.margin
             }
