@@ -537,6 +537,20 @@ impl MatchEngine {
         }
 
         if let Some(position) = position {
+            if side == Side::BuySell && position.side == Side::SellShort {
+                anyhow::bail!(
+                    "product {}: buy sell, but position side is sell short",
+                    product,
+                );
+            }
+
+            if side == Side::SellLong && position.side == Side::BuyLong {
+                anyhow::bail!(
+                    "product {}: sell long, but position side is buy long",
+                    product,
+                );
+            }
+
             let price = if price == 0.0 { k.close } else { price };
 
             // 最小下单价值
@@ -1437,6 +1451,66 @@ mod tests {
                     margin: 20.0,
                 }
         );
+    }
+
+    #[test]
+    fn test_order3() {
+        let config = Config::new().initial_margin(1000.0);
+
+        let mut me = MatchEngine::new(config);
+
+        me.product("BTC-USDT-SWAP", 0.01, 0.0);
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 114514,
+                open: 1000.0,
+                high: 2500.0,
+                low: 500.0,
+                close: 2000.0,
+            },
+        );
+
+        me.order(
+            "BTC-USDT-SWAP",
+            Side::BuyLong,
+            0.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        )
+        .unwrap();
+
+        me.update();
+
+        me.ready(
+            "BTC-USDT-SWAP",
+            K {
+                time: 114514,
+                open: 1000.0,
+                high: 2500.0,
+                low: 500.0,
+                close: 2000.0,
+            },
+        );
+
+        let result = me.order(
+            "BTC-USDT-SWAP",
+            Side::SellLong,
+            0.0,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+            Unit::Zero,
+        );
+
+        println!("{}", result.unwrap_err());
     }
 
     #[test]
