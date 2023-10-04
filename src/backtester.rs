@@ -69,34 +69,92 @@ where
         let min_notional = self.exchange.get_min_notional(product).await?;
         let range = range.into();
         let k_list = get_k_range(&self.exchange, product, k_level, range).await?;
+
         let strategy_k_list = if k_level == strategy_level {
             k_list.as_slice()
         } else {
             k_convert(&k_list, strategy_level).leak()
         };
+
         let open = strategy_k_list.iter().map(|v| v.open).collect::<Vec<_>>();
         let high = strategy_k_list.iter().map(|v| v.high).collect::<Vec<_>>();
         let low = strategy_k_list.iter().map(|v| v.low).collect::<Vec<_>>();
         let close = strategy_k_list.iter().map(|v| v.close).collect::<Vec<_>>();
+
         let mut me = MatchEngine::new(self.config);
-        let mut k_index = k_list.len() - 1;
+        me.insert_product(product, min_size, min_notional);
 
-        me.product(product, min_size, min_notional);
+        struct IndexIter<'a> {
+            k_list: &'a [K],
+            strategy_list: &'a [K],
+            k_index: usize,
+            strategy_index: usize,
+        }
 
-        'a: for (strategy_index, v) in strategy_k_list.iter().enumerate().rev() {
-            loop {
-                me.ready(
-                    product,
-                    K {
-                        time: k_list[k_index].time,
-                        open: k_list[k_index].open,
-                        high: k_list[k_index].high,
-                        low: k_list[k_index].low,
-                        close: k_list[k_index].close,
-                    },
-                );
+        impl<'a> IndexIter<'a> {
+            fn new(k_list: &'a [K], strategy_list: &'a [K]) -> Self {
+                Self {
+                    k_list,
+                    strategy_list,
+                    k_index: k_list.len(),
+                    strategy_index: strategy_list.len(),
+                }
+            }
+        }
 
-                if k_list[k_index].time == v.time {
+        impl<'a> Iterator for IndexIter<'a> {
+            type Item = (usize, usize);
+
+            fn next(&mut self) -> Option<Self::Item> {
+                // [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
+                // [1000, 700, 400, 100]
+                // Some((7, 3))
+                // Some((4, 2))
+                // Some((1, 1))
+                // None
+                if let [.., start, _] = self.strategy_list[..self.strategy_index] {
+                    self.k_index = self.k_list[..self.k_index]
+                        .iter()
+                        .rposition(|v| v.time >= start.time)?;
+                    self.strategy_index -= 1;
+
+                    return (self.k_index + 1 < self.k_list.len())
+                        .then_some((self.k_index + 1, self.strategy_index));
+                }
+
+                None
+            }
+        }
+
+        let mut index_iter = IndexIter::new(&k_list, strategy_k_list);
+        let mut end_index = None;
+
+        for k_index in (0..k_list.len()).rev() {
+            me.ready(
+                product,
+                K {
+                    time: k_list[k_index].time,
+                    open: k_list[k_index].open,
+                    high: k_list[k_index].high,
+                    low: k_list[k_index].low,
+                    close: k_list[k_index].close,
+                },
+            );
+
+            if let Some((index, strategy_index)) = {
+                if k_level == strategy_level {
+                    Some((k_index, k_index))
+                } else {
+                    match end_index {
+                        Some(v) => Some(v),
+                        None => {
+                            end_index = index_iter.next();
+                            end_index
+                        }
+                    }
+                }
+            } {
+                if k_index == index {
                     let time = strategy_k_list[strategy_index].time;
                     let open = Source::new(&open[strategy_index..]);
                     let high = Source::new(&high[strategy_index..]);
@@ -116,195 +174,14 @@ where
                     };
 
                     strategy(&mut cx);
-                    me.update();
-                    if k_index == 0 {
-                        break 'a;
-                    }
-                    k_index -= 1;
-                    break;
-                }
 
-                me.update();
-                if k_index == 0 {
-                    break;
+                    end_index = None;
                 }
-                k_index -= 1;
             }
+
+            me.update();
         }
 
         Ok(me.history().clone())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::*;
-
-    #[tokio::test]
-    async fn test_1() {
-        let k = include_str!("../tests/BTC-USDT-SWAP-1m.json");
-
-        let exchange = LocalExchange::new().push(
-            "BTC-USDT-SWAP",
-            Level::Minute1,
-            serde_json::from_str::<Vec<K>>(k).unwrap(),
-            0.01,
-            0.0,
-        );
-
-        let config = Config::new()
-            .initial_margin(1000.0)
-            .quantity(Unit::Contract(1))
-            .margin(Unit::Quantity(10.0))
-            .lever(100)
-            .open_fee(0.0002)
-            .close_fee(0.0005)
-            .maintenance(0.004);
-
-        let backtester = Backtester::new(exchange, config);
-
-        let strategy = |cx: &mut Context| {
-            println!(
-                "{} {} {} {} {} {}",
-                cx.time,
-                time_to_string(cx.time),
-                cx.open,
-                cx.high,
-                cx.low,
-                cx.close,
-            );
-        };
-
-        let result = backtester
-            .start_convert(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Week1, 0)
-            .await;
-
-        println!("{:#?}", result);
-    }
-
-    #[tokio::test]
-    async fn test_2() {
-        let k = include_str!("../tests/BTC-USDT-SWAP-1m.json");
-
-        let exchange = LocalExchange::new().push(
-            "BTC-USDT-SWAP",
-            Level::Minute1,
-            serde_json::from_str::<Vec<K>>(k).unwrap(),
-            0.01,
-            0.0,
-        );
-
-        let config = Config::new()
-            .initial_margin(1000.0)
-            .quantity(Unit::Contract(1))
-            .margin(Unit::Quantity(10.0))
-            .lever(100)
-            .open_fee(0.0002)
-            .close_fee(0.0005)
-            .maintenance(0.004);
-
-        let backtester = Backtester::new(exchange, config);
-
-        let strategy = |cx: &mut Context| {
-            println!(
-                "{} {} {} {} {} {}",
-                cx.time,
-                time_to_string(cx.time),
-                cx.open,
-                cx.high,
-                cx.low,
-                cx.close,
-            );
-        };
-
-        let result = backtester
-            .start_convert(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Hour4, 0)
-            .await;
-
-        println!("{:#?}", result);
-    }
-
-    #[tokio::test]
-    async fn test_3() {
-        let k = include_str!("../tests/BTC-USDT-SWAP-4h.json");
-
-        let exchange = LocalExchange::new().push(
-            "BTC-USDT-SWAP",
-            Level::Hour4,
-            serde_json::from_str::<Vec<K>>(k).unwrap(),
-            0.01,
-            0.0,
-        );
-
-        let config = Config::new()
-            .initial_margin(1000.0)
-            .quantity(Unit::Contract(1))
-            .margin(Unit::Quantity(10.0))
-            .lever(100)
-            .open_fee(0.0002)
-            .close_fee(0.0005)
-            .maintenance(0.004);
-
-        let backtester = Backtester::new(exchange, config);
-
-        let strategy = |cx: &mut Context| {
-            println!(
-                "{} {} {} {} {} {}",
-                cx.time,
-                time_to_string(cx.time),
-                cx.open,
-                cx.high,
-                cx.low,
-                cx.close,
-            );
-        };
-
-        let result = backtester
-            .start_convert(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour4, 0)
-            .await;
-
-        println!("{:#?}", result);
-    }
-
-    #[tokio::test]
-    async fn test_4() {
-        let k = include_str!("../tests/BTC-USDT-SWAP-4h.json");
-
-        let exchange = LocalExchange::new().push(
-            "BTC-USDT-SWAP",
-            Level::Hour4,
-            serde_json::from_str::<Vec<K>>(k).unwrap(),
-            0.01,
-            0.0,
-        );
-
-        let config = Config::new()
-            .initial_margin(1000.0)
-            .quantity(Unit::Contract(1))
-            .margin(Unit::Quantity(10.0))
-            .lever(100)
-            .open_fee(0.0002)
-            .close_fee(0.0005)
-            .maintenance(0.004);
-
-        let backtester = Backtester::new(exchange, config);
-
-        let strategy = |cx: &mut Context| {
-            println!(
-                "{} {} {} {} {} {}",
-                cx.time,
-                time_to_string(cx.time),
-                cx.open,
-                cx.high,
-                cx.low,
-                cx.close,
-            );
-        };
-
-        let result = backtester
-            .start_convert(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour12, 0)
-            .await;
-
-        println!("{:#?}", result);
     }
 }

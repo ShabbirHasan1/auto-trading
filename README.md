@@ -13,7 +13,7 @@ backtest, strategy, multiple platforms, quantitative trading framework.
 
 ```
 [dependencies]
-auto-trading = "0.7.4"
+auto-trading = "0.8.0"
 ```
 
 # Examples 1
@@ -37,7 +37,7 @@ async fn test_1() {
 
     let config = Config::new()
         .initial_margin(1000.0)
-        .quantity(Unit::Contract(1))
+        .quantity(Unit::Quantity(0.01))
         .margin(Unit::Quantity(10.0))
         .lever(100)
         .open_fee(0.0002)
@@ -128,6 +128,10 @@ cx.order_condition(
 
 Backtesting a 4-hour strategy using 1-minute candlestick data means that your liquidation, closing, opening, and profit/loss calculations will refresh at the 1-minute time interval, while the strategy's invocation period is set at 4 hours.
 
+## 强烈建议使用 1 分钟级别的 k 线数据进行回测。
+
+## Backtesting with 1-minute level k-line data is highly recommended.
+
 ```rust
 use auto_trading::*;
 
@@ -158,9 +162,9 @@ async fn test_2() {
 
 # Built-in Functions
 
-在 `auto_trading::util` 内置了 highest, lowest, sma, ema, rma, cci, macd 等其他函数。
+在 `auto_trading::util` 内置了 crossover, crossunder, highest, lowest, sma, ema, rma, cci, macd 等其他函数。
 
-In `auto_trading::util`, there are other built-in functions such as highest, lowest, sma, ema, rma, cci, macd, and more.
+In `auto_trading::util`, there are other built-in functions such as crossover, crossunder, highest, lowest, sma, ema, rma, cci, macd, and more.
 
 ```rust
 use auto_trading::*;

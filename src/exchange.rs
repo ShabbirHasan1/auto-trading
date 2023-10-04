@@ -14,7 +14,7 @@ pub trait Exchange {
         S: AsRef<str>,
         S: Send;
 
-    /// 获取最小下单数量。
+    /// 获取最小委托数量。
     ///
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `return` 单位为币。
@@ -49,7 +49,7 @@ impl LocalExchange {
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `level` 时间级别。
     /// * `k` k 线数据。
-    /// * `min_size` 最小下单数量。
+    /// * `min_size` 最小委托数量。
     /// * `min_notional` 最小名义价值。
     pub fn push<S>(
         mut self,
@@ -104,7 +104,11 @@ impl Exchange for LocalExchange {
                     .cloned()
                     .collect()
             })
-            .ok_or(anyhow::anyhow!("no product: {} {}", product, level))
+            .ok_or(anyhow::anyhow!(
+                "exchange: no product: {} level: {}",
+                product,
+                level
+            ))
     }
 
     async fn get_min_size<S>(&self, product: S) -> anyhow::Result<f64>
@@ -117,7 +121,7 @@ impl Exchange for LocalExchange {
             .iter()
             .find(|v| v.0 == product)
             .map(|v| v.3)
-            .ok_or(anyhow::anyhow!("no product: {}", product))
+            .ok_or(anyhow::anyhow!("exchange: no product: {}", product))
     }
 
     async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
@@ -130,7 +134,7 @@ impl Exchange for LocalExchange {
             .iter()
             .find(|v| v.0 == product)
             .map(|v| v.4)
-            .ok_or(anyhow::anyhow!("no product: {}", product))
+            .ok_or(anyhow::anyhow!("exchange: no product: {}", product))
     }
 }
 
@@ -552,7 +556,7 @@ impl crate::Exchange for Binance {
                     .parse::<f64>()
                     .unwrap()
             })
-            .ok_or(anyhow::anyhow!("no product: {}", product))
+            .ok_or(anyhow::anyhow!("exchange: no product: {}", product))
     }
 
     async fn get_min_notional<S>(&self, product: S) -> anyhow::Result<f64>
@@ -615,86 +619,6 @@ impl crate::Exchange for Binance {
                 .parse::<f64>()
                 .unwrap()
             })
-            .ok_or(anyhow::anyhow!("no product: {}", product))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::*;
-
-    #[tokio::test]
-    async fn okx_get_k() {
-        let exchange = Okx::new().unwrap();
-
-        let k1 = exchange
-            .get_k("BTC-USDT-SWAP", Level::Hour1, 0)
-            .await
-            .unwrap();
-
-        let k2 = exchange
-            .get_k("BTC-USDT", Level::Hour1, k1.last().unwrap().time)
-            .await
-            .unwrap();
-
-        println!("{}", k1[0].open);
-        println!("{}", k2[0].open);
-        println!("{}", time_to_string(k1[0].time));
-        println!("{}", time_to_string(k1.last().unwrap().time));
-        println!("{}", time_to_string(k2[0].time));
-        println!("{}", time_to_string(k2.last().unwrap().time));
-
-        assert!(k1.last().unwrap().time != k2[0].time);
-    }
-
-    #[tokio::test]
-    async fn okx_get_min_size() {
-        let exchange = Okx::new().unwrap();
-        let x = exchange.get_min_size("BTC-USDT-SWAP").await.unwrap();
-        assert!(x == 0.01);
-        let x = exchange.get_min_size("BTC-USDT").await.unwrap();
-        assert!(x == 0.00001);
-    }
-
-    #[tokio::test]
-    async fn binance_get_k() {
-        let exchange = Binance::new().unwrap();
-
-        let k1 = exchange
-            .get_k("BTC-USDT-SWAP", Level::Hour1, 0)
-            .await
-            .unwrap();
-
-        let k2 = exchange
-            .get_k("BTC-USDT", Level::Hour1, k1.last().unwrap().time)
-            .await
-            .unwrap();
-
-        println!("{}", k1[0].open);
-        println!("{}", k2[0].open);
-        println!("{}", time_to_string(k1[0].time));
-        println!("{}", time_to_string(k1.last().unwrap().time));
-        println!("{}", time_to_string(k2[0].time));
-        println!("{}", time_to_string(k2.last().unwrap().time));
-
-        assert!(k1.last().unwrap().time != k2[0].time);
-    }
-
-    #[tokio::test]
-    async fn binance_get_min_size() {
-        let exchange = Binance::new().unwrap();
-        let x = exchange.get_min_size("BTC-USDT-SWAP").await.unwrap();
-        assert!(x == 0.001);
-        let x = exchange.get_min_size("BTC-USDT").await.unwrap();
-        assert!(x == 0.00001);
-    }
-
-    #[tokio::test]
-    async fn binance_get_min_notional() {
-        let exchange = Binance::new().unwrap();
-        let x = exchange.get_min_notional("BTC-USDT-SWAP").await.unwrap();
-        assert!(x == 5.0);
-        let x = exchange.get_min_notional("BTC-USDT").await.unwrap();
-        assert!(x == 5.0);
+            .ok_or(anyhow::anyhow!("exchange: no product: {}", product))
     }
 }

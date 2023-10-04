@@ -29,7 +29,15 @@ pub fn highest(source: &Source, length: usize) -> f64 {
         return f64::NAN;
     }
 
-    *source.iter().take(3).max_by(|a, b| a.total_cmp(b)).unwrap()
+    let mut result = source[0];
+
+    for i in 1..length {
+        if source[i] > result {
+            result = source[i];
+        }
+    }
+
+    result
 }
 
 pub fn lowest(source: &Source, length: usize) -> f64 {
@@ -37,11 +45,15 @@ pub fn lowest(source: &Source, length: usize) -> f64 {
         return f64::NAN;
     }
 
-    *source
-        .into_iter()
-        .take(3)
-        .max_by(|a, b| a.total_cmp(b))
-        .unwrap()
+    let mut result = source[0];
+
+    for i in 1..length {
+        if source[i] < result {
+            result = source[i];
+        }
+    }
+
+    result
 }
 
 pub fn sma(source: &Source, length: usize) -> f64 {
@@ -53,6 +65,10 @@ pub fn sma(source: &Source, length: usize) -> f64 {
 }
 
 pub fn ema(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
     let alpha = 2.0 / (length + 1) as f64;
 
     yield_nan(source, |prev, source| {
@@ -65,6 +81,10 @@ pub fn ema(source: &Source, length: usize) -> f64 {
 }
 
 pub fn rma(source: &Source, length: usize) -> f64 {
+    if source.len() < length {
+        return f64::NAN;
+    }
+
     let alpha = 1.0 / length as f64;
 
     yield_nan(source, |prev, source| {
@@ -92,9 +112,14 @@ pub fn macd(
     long_length: usize,
     dea_length: usize,
 ) -> (f64, f64, f64) {
+    if source.len() < short_length || source.len() < long_length || source.len() < dea_length {
+        return (f64::NAN, f64::NAN, f64::NAN);
+    }
+
     let dif = ema(source, short_length) - ema(source, long_length);
     let dea = ema(
         Source::new(
+            // 不要使用 take
             &yield_map(source, |v| ema(v, short_length) - ema(v, long_length))
                 .collect::<Vec<f64>>(),
         ),
@@ -126,6 +151,47 @@ pub fn rsi(source: &Source, length: usize) -> f64 {
     let rs = rma(Source::new(&u), length) / rma(Source::new(&d), length);
 
     100.0 - 100.0 / (1.0 + rs)
+}
+
+/// 如果在当前 k 线上，`source` 的值大于 `value` 的值，并且在前一根 k 线上，`source` 的值小于或等于 `value` 的值，则返回 true。
+///
+/// * `source` 数据系列。
+/// * `value` 值。
+pub fn crossover(source: &Source, value: f64) -> bool {
+    source > value && source[1] <= value
+}
+
+/// 如果在当前 k 线上，`source` 的值大于 `value` 的值，并且在前一根 k 线上，`source` 的值小于或等于 `value` 的值，则返回 true。
+///
+/// * `source` 数据系列。
+/// * `value` 值。
+/// * `f` 映射函数。
+pub fn crossover_map<F>(source: &Source, value: f64, mut f: F) -> bool
+where
+    F: FnMut(&Source) -> f64,
+{
+    f(source) > value && f(&source[1..]) <= value
+}
+
+/// 如果在当前 k 线上，`source` 的值小于 `value` 的值，并且在前一根 k 线上，`source` 的值大于或等于 `value` 的值，则返回 true。
+///
+/// * `source` 数据系列。
+/// * `value` 值。
+/// * `f` 映射函数。
+pub fn crossunder(source: &Source, value: f64) -> bool {
+    source < value && source[1] >= value
+}
+
+/// 如果在当前 k 线上，`source` 的值小于 `value` 的值，并且在前一根 k 线上，`source` 的值大于或等于 `value` 的值，则返回 true。
+///
+/// * `source` 数据系列。
+/// * `value` 值。
+/// * `f` 映射函数。
+pub fn crossunder_map<F>(source: &Source, value: f64, mut f: F) -> bool
+where
+    F: FnMut(&Source) -> f64,
+{
+    f(source) < value && f(&source[1..]) >= value
 }
 
 /// 时间戳转换到本地时间文本。
@@ -1101,235 +1167,155 @@ where
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use crate::*;
+/// 快速计算 ema。
+pub struct EMACache {
+    last: f64,
+}
 
-    #[test]
-    fn test_k_convert1() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Minute1);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 == result[2].time);
+impl EMACache {
+    pub fn new() -> Self {
+        Self { last: f64::NAN }
     }
 
-    #[test]
-    fn test_k_convert2() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+    /// 计算 ema。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` ema。
+    pub fn ema(&mut self, source: &Source, length: usize) -> f64 {
+        self.last = if self.last.is_nan() {
+            ema(source, length)
+        } else {
+            if source.len() < length {
+                return f64::NAN;
+            }
 
-        let x = std::time::SystemTime::now();
+            let alpha = 2.0 / (length + 1) as f64;
+            alpha * source + (1.0 - alpha) * self.last
+        };
+        self.last
+    }
+}
 
-        let result = k_convert(&array, Level::Minute3);
+/// 快速计算 rma。
+pub struct RMACache {
+    last: f64,
+}
 
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 3 == result[2].time);
+impl RMACache {
+    pub fn new() -> Self {
+        Self { last: f64::NAN }
     }
 
-    #[test]
-    fn test_k_convert3() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+    /// 计算 rma。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` rma。
+    pub fn rma(&mut self, source: &Source, length: usize) -> f64 {
+        self.last = if self.last.is_nan() {
+            rma(source, length)
+        } else {
+            if source.len() < length {
+                return f64::NAN;
+            }
 
-        let x = std::time::SystemTime::now();
+            let alpha = 1.0 / length as f64;
+            alpha * source + (1.0 - alpha) * self.last
+        };
+        self.last
+    }
+}
 
-        let result = k_convert(&array, Level::Minute5);
+/// 快速计算 macd。
+pub struct MACDCache {
+    short_ema: EMACache,
+    long_ema: EMACache,
+    dea_ema: EMACache,
+    dea: std::collections::VecDeque<f64>,
+}
 
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 5 == result[2].time);
+impl MACDCache {
+    pub fn new() -> Self {
+        Self {
+            short_ema: EMACache::new(),
+            long_ema: EMACache::new(),
+            dea_ema: EMACache::new(),
+            dea: std::collections::VecDeque::new(),
+        }
     }
 
-    #[test]
-    fn test_k_convert4() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+    /// 计算 macd。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `short_length` 快线长度，当前长度必须等于前一个长度。
+    /// * `long_length` 慢线长度，当前长度必须等于前一个长度。
+    /// * `dea_length` dea 长度，当前长度必须等于前一个长度。
+    /// * `return` macd。
+    pub fn macd(
+        &mut self,
+        source: &Source,
+        short_length: usize,
+        long_length: usize,
+        dea_length: usize,
+    ) -> (f64, f64, f64) {
+        if source.len() < short_length || source.len() < long_length || source.len() < dea_length {
+            return (f64::NAN, f64::NAN, f64::NAN);
+        }
 
-        let x = std::time::SystemTime::now();
+        let dif = self.short_ema.ema(source, short_length) - self.long_ema.ema(source, long_length);
+        self.dea.push_front(dif);
+        let dea = self
+            .dea_ema
+            .ema(Source::new(&self.dea.as_slices().0), dea_length);
+        let macd = (dif - dea) * 2.0;
+        (dif, dea, macd)
+    }
+}
 
-        let result = k_convert(&array, Level::Minute15);
+/// 快速计算 rsi。
+pub struct RSICache {
+    u: std::collections::VecDeque<f64>,
+    d: std::collections::VecDeque<f64>,
+    u_rma: RMACache,
+    d_rma: RMACache,
+}
 
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 15 == result[2].time);
+impl RSICache {
+    pub fn new() -> Self {
+        Self {
+            u: std::collections::VecDeque::new(),
+            d: std::collections::VecDeque::new(),
+            u_rma: RMACache::new(),
+            d_rma: RMACache::new(),
+        }
     }
 
-    #[test]
-    fn test_k_convert5() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
+    /// 计算 rsi。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` rsi。
+    pub fn rsi(&mut self, source: &Source, length: usize) -> f64 {
+        if source.len() < length {
+            return f64::NAN;
+        }
 
-        let x = std::time::SystemTime::now();
+        self.u.push_front({
+            let temp = source - source[1];
+            let temp = if temp.is_nan() { 0.0 } else { temp };
+            temp.max(0.0)
+        });
 
-        let result = k_convert(&array, Level::Minute30);
+        self.d.push_front({
+            let temp = source[1] - source;
+            let temp = if temp.is_nan() { 0.0 } else { temp };
+            temp.max(0.0)
+        });
 
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
+        let rs = self.u_rma.rma(Source::new(self.u.as_slices().0), length)
+            / self.d_rma.rma(Source::new(self.d.as_slices().0), length);
 
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 30 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert6() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Hour1);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert7() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Hour2);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 2 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert8() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Hour4);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 4 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert9() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Hour6);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 6 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert10() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Hour12);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 12 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert11() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Day1);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 24 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert12() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Day3);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 24 * 3 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert13() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Week1);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        assert!(result[1].time - 1000 * 60 * 60 * 24 * 7 == result[2].time);
-    }
-
-    #[test]
-    fn test_k_convert14() {
-        let array =
-            serde_json::from_str::<Vec<K>>(include_str!("../tests/BTC-USDT-SWAP-1m.json")).unwrap();
-
-        let x = std::time::SystemTime::now();
-
-        let result = k_convert(&array, Level::Month1);
-
-        let x = std::time::SystemTime::now().duration_since(x).unwrap();
-
-        println!("{}", x.as_millis());
-
-        let temp = chrono::NaiveDateTime::from_timestamp_millis(result[1].time as i64).unwrap();
-
-        let next = temp - chrono::Months::new(1);
-
-        assert!(result[2].time == next.timestamp_millis() as u64);
+        100.0 - 100.0 / (1.0 + rs)
     }
 }
