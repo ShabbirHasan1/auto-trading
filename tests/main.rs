@@ -225,26 +225,26 @@ async fn test_my() {
                     }
                 }
 
-                // if cx.close < ema200 {
-                //     if a < b && last_macd >= b {
-                //         if rsi14 < 50.0 && cx.position().is_none() {
-                //             let high = highest(cx.high, 7);
-                //             let result = cx.order_profit_loss(
-                //                 Side::SellShort,
-                //                 0.0,
-                //                 Unit::Quantity(cx.close - (high - cx.close) * 2.0),
-                //                 Unit::Quantity(high),
-                //             );
-                //             println!(
-                //                 "做空 {} {} {} {:?}",
-                //                 cx.time,
-                //                 time_to_string(cx.time),
-                //                 cx.close,
-                //                 result
-                //             );
-                //         }
-                //     }
-                // }
+                if cx.close < ema200 {
+                    if a < b && last_macd >= b {
+                        if rsi14 < 50.0 && cx.position().is_none() {
+                            let high = highest(cx.high, 7);
+                            let result = cx.order_profit_loss(
+                                Side::SellShort,
+                                0.0,
+                                Unit::Quantity(cx.close - (high - cx.close) * 2.0),
+                                Unit::Quantity(high),
+                            );
+                            println!(
+                                "做空 {} {} {} {:?}",
+                                cx.time,
+                                time_to_string(cx.time),
+                                cx.close,
+                                result
+                            );
+                        }
+                    }
+                }
 
                 last_macd = a;
             },

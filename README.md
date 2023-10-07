@@ -13,7 +13,7 @@ backtest, strategy, multiple platforms, quantitative trading framework.
 
 ```
 [dependencies]
-auto-trading = "0.8.0"
+auto-trading = "0.8.1"
 ```
 
 # Examples 1
