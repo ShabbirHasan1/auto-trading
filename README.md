@@ -13,7 +13,7 @@ backtest, strategy, multiple platforms, quantitative trading framework.
 
 ```
 [dependencies]
-auto-trading = "0.8.1"
+auto-trading = "0.8.2"
 ```
 
 # Examples 1
@@ -138,17 +138,22 @@ use auto_trading::*;
 #[tokio::test]
 async fn test_2() {
     // 使用 1 分钟的 k 线数据。
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str(include_str!("BTC-USDT-SWAP-1m.json")).unwrap(),
-        0.01,
-        0.0,
-    );
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
+
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            // k 线转换
+            k_convert(k, Level::Hour4),
+            0.01,
+            0.0,
+        );
 
     // Level::Minute1 -> Level::Hour4
     Backtester::new(exchange, Config::new())
-        .start_convert(
+        .start_amplifier(
             |cx| println!("{} {}", cx.time, time_to_string(cx.time)),
             "BTC-USDT-SWAP",
             Level::Minute1,
@@ -172,9 +177,7 @@ use auto_trading::*;
 #[tokio::test]
 async fn test_3() {
     println!("{}", time_to_string(1145141919810));
-
     println!("{}", string_to_time("2006-04-16 06:58:39"));
-
     println!(
         "{:?}",
         get_k_range(
@@ -207,6 +210,14 @@ fn test_4() {
     assert!((&source[10..]).len() == 0);
 }
 ```
+
+# Visualize
+
+使用 `to_html` 函数将回测结果可视化。
+
+Use the `to_html` function to visualize the backtest results.
+
+<img src="https://f.pz.al/pzal/2023/10/24/8414cbc43788e.png">
 
 # Architecture
 

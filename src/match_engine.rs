@@ -453,9 +453,16 @@ impl MatchEngine {
                         } else {
                             Side::SellLong
                         },
-                        price: match stop_profit {
-                            Unit::Quantity(b) => Price::GreaterThanLimit(a, b),
-                            _ => Price::GreaterThanMarket(a),
+                        price: if side == Side::BuyLong {
+                            match stop_profit {
+                                Unit::Quantity(b) => Price::GreaterThanLimit(a, b),
+                                _ => Price::GreaterThanMarket(a),
+                            }
+                        } else {
+                            match stop_profit {
+                                Unit::Quantity(b) => Price::LessThanLimit(a, b),
+                                _ => Price::GreaterThanMarket(a),
+                            }
                         },
                         quantity,
                         margin,
@@ -476,9 +483,16 @@ impl MatchEngine {
                         } else {
                             Side::SellLong
                         },
-                        price: match stop_loss {
-                            Unit::Quantity(b) => Price::LessThanLimit(a, b),
-                            _ => Price::LessThanMarket(a),
+                        price: if side == Side::BuyLong {
+                            match stop_loss {
+                                Unit::Quantity(b) => Price::LessThanLimit(a, b),
+                                _ => Price::LessThanMarket(a),
+                            }
+                        } else {
+                            match stop_loss {
+                                Unit::Quantity(b) => Price::GreaterThanLimit(a, b),
+                                _ => Price::GreaterThanMarket(a),
+                            }
                         },
                         quantity,
                         margin,
@@ -499,9 +513,16 @@ impl MatchEngine {
                         } else {
                             Side::SellLong
                         },
-                        price: match stop_profit {
-                            Unit::Quantity(v) => Price::GreaterThanLimit(a, v),
-                            _ => Price::GreaterThanMarket(a),
+                        price: if side == Side::BuyLong {
+                            match stop_profit {
+                                Unit::Quantity(v) => Price::GreaterThanLimit(a, v),
+                                _ => Price::GreaterThanMarket(a),
+                            }
+                        } else {
+                            match stop_profit {
+                                Unit::Quantity(v) => Price::LessThanLimit(a, v),
+                                _ => Price::LessThanMarket(a),
+                            }
                         },
                         quantity,
                         margin,
@@ -513,9 +534,16 @@ impl MatchEngine {
                         } else {
                             Side::SellLong
                         },
-                        price: match stop_loss {
-                            Unit::Quantity(v) => Price::LessThanLimit(b, v),
-                            _ => Price::LessThanMarket(b),
+                        price: if side == Side::BuyLong {
+                            match stop_loss {
+                                Unit::Quantity(v) => Price::LessThanLimit(b, v),
+                                _ => Price::LessThanMarket(b),
+                            }
+                        } else {
+                            match stop_loss {
+                                Unit::Quantity(v) => Price::GreaterThanLimit(b, v),
+                                _ => Price::GreaterThanMarket(b),
+                            }
                         },
                         quantity,
                         margin,
@@ -722,7 +750,7 @@ impl MatchEngine {
         let mut handle =
             |k: &K, delegate_state: &mut DelegateState, position: &mut Option<Position>| {
                 let mut flag = 0;
-
+              
                 macro_rules! remove_or_convert {
                     () => {
                         match delegate_state {

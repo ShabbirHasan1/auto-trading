@@ -58,17 +58,21 @@ async fn test_1() {
 #[tokio::test]
 async fn test_2() {
     // 使用 1 分钟的 k 线数据。
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap(),
-        0.01,
-        0.0,
-    );
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
+
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            k_convert(k, Level::Hour4),
+            0.01,
+            0.0,
+        );
 
     // Level::Minute1 -> Level::Hour4
     Backtester::new(exchange, Config::new())
-        .start_convert(
+        .start_amplifier(
             |cx| println!("{} {}", cx.time, time_to_string(cx.time)),
             "BTC-USDT-SWAP",
             Level::Minute1,
@@ -82,9 +86,7 @@ async fn test_2() {
 #[tokio::test]
 async fn test_3() {
     println!("{}", time_to_string(1145141919810));
-
     println!("{}", string_to_time("2006-04-16 06:58:39"));
-
     println!(
         "{:?}",
         get_k_range(
@@ -169,13 +171,17 @@ async fn test_local() {
 
 #[tokio::test]
 async fn test_my() {
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap(),
-        0.01,
-        0.0,
-    );
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
+
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Minute15,
+            k_convert(&k, Level::Minute15),
+            0.01,
+            0.0,
+        );
 
     let config = Config::new()
         .initial_margin(1000.0)
@@ -194,12 +200,11 @@ async fn test_my() {
     let mut last_macd = f64::NAN;
 
     let result = backtester
-        .start_convert(
+        .start_amplifier(
             |cx| {
                 // close > ema 200
                 // macd short > long
                 // rsi14 >= 50
-
                 let ema200 = ema_cache.ema(cx.close, 200);
                 let (a, b, ..) = macd_cache.macd(cx.close, 12, 26, 9);
                 let rsi14 = rsi_cache.rsi(cx.close, 14);
@@ -208,17 +213,20 @@ async fn test_my() {
                     if a > b && last_macd <= b {
                         if rsi14 > 50.0 && cx.position().is_none() {
                             let low = lowest(cx.low, 7);
+                            let sp = cx.close + (cx.close - low) * 2.0;
                             let result = cx.order_profit_loss(
                                 Side::BuyLong,
                                 0.0,
-                                Unit::Quantity(cx.close + (cx.close - low) * 2.0),
+                                Unit::Quantity(sp),
                                 Unit::Quantity(low),
                             );
                             println!(
-                                "做多 {} {} {} {:?}",
+                                "做多 {} {} {} 止盈 {} 止损 {} {:?}",
                                 cx.time,
                                 time_to_string(cx.time),
                                 cx.close,
+                                sp,
+                                low,
                                 result
                             );
                         }
@@ -229,17 +237,20 @@ async fn test_my() {
                     if a < b && last_macd >= b {
                         if rsi14 < 50.0 && cx.position().is_none() {
                             let high = highest(cx.high, 7);
+                            let sp = cx.close - (high - cx.close) * 2.0;
                             let result = cx.order_profit_loss(
                                 Side::SellShort,
                                 0.0,
-                                Unit::Quantity(cx.close - (high - cx.close) * 2.0),
+                                Unit::Quantity(sp),
                                 Unit::Quantity(high),
                             );
                             println!(
-                                "做空 {} {} {} {:?}",
+                                "做空 {} {} {} 止盈 {} 止损 {} {:?}",
                                 cx.time,
                                 time_to_string(cx.time),
                                 cx.close,
+                                sp,
+                                high,
                                 result
                             );
                         }
@@ -256,7 +267,8 @@ async fn test_my() {
         .await
         .unwrap();
 
-    println!("{:#?}", result);
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-4h.json")).unwrap();
+    std::fs::write("./index.html", to_html(&k, &result)).unwrap();
     println!("所有盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
     let mut q = 0.0;
     let mut w = 0.0;

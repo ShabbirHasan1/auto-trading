@@ -552,8 +552,7 @@ pub struct Context<'a> {
     /// 收盘价数据系列。
     pub close: &'a Source,
 
-    /// 撮合引擎
-    pub(crate) me: *mut MatchEngine,
+    pub(crate) trading: &'a mut dyn Trading,
 }
 
 impl<'a> Context<'a> {
@@ -575,19 +574,17 @@ impl<'a> Context<'a> {
     /// * `price` 委托价格，0 表示市价，其他表示限价。
     /// * `return` 委托 id。
     pub fn order(&mut self, side: Side, price: f64) -> anyhow::Result<u64> {
-        unsafe {
-            self.me.as_mut().unwrap().order(
-                self.product,
-                side,
-                price,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-            )
-        }
+        self.trading.order(
+            self.product,
+            side,
+            price,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+        )
     }
 
     /// 委托。
@@ -616,19 +613,17 @@ impl<'a> Context<'a> {
         stop_profit_condition: Unit,
         stop_loss_condition: Unit,
     ) -> anyhow::Result<u64> {
-        unsafe {
-            self.me.as_mut().unwrap().order(
-                self.product,
-                side,
-                price,
-                Unit::Ignore,
-                Unit::Ignore,
-                stop_profit_condition,
-                stop_loss_condition,
-                Unit::Ignore,
-                Unit::Ignore,
-            )
-        }
+        self.trading.order(
+            self.product,
+            side,
+            price,
+            Unit::Ignore,
+            Unit::Ignore,
+            stop_profit_condition,
+            stop_loss_condition,
+            Unit::Ignore,
+            Unit::Ignore,
+        )
     }
 
     /// 委托。
@@ -661,19 +656,17 @@ impl<'a> Context<'a> {
         stop_profit: Unit,
         stop_loss: Unit,
     ) -> anyhow::Result<u64> {
-        unsafe {
-            self.me.as_mut().unwrap().order(
-                self.product,
-                side,
-                price,
-                Unit::Ignore,
-                Unit::Ignore,
-                stop_profit_condition,
-                stop_loss_condition,
-                stop_profit,
-                stop_loss,
-            )
-        }
+        self.trading.order(
+            self.product,
+            side,
+            price,
+            Unit::Ignore,
+            Unit::Ignore,
+            stop_profit_condition,
+            stop_loss_condition,
+            stop_profit,
+            stop_loss,
+        )
     }
 
     /// 委托。
@@ -702,19 +695,17 @@ impl<'a> Context<'a> {
         quantity: Unit,
         margin: Unit,
     ) -> anyhow::Result<u64> {
-        unsafe {
-            self.me.as_mut().unwrap().order(
-                self.product,
-                side,
-                price,
-                quantity,
-                margin,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-                Unit::Ignore,
-            )
-        }
+        self.trading.order(
+            self.product,
+            side,
+            price,
+            quantity,
+            margin,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+            Unit::Ignore,
+        )
     }
 
     /// 委托。
@@ -751,19 +742,17 @@ impl<'a> Context<'a> {
         stop_profit: Unit,
         stop_loss: Unit,
     ) -> anyhow::Result<u64> {
-        unsafe {
-            self.me.as_mut().unwrap().order(
-                self.product,
-                side,
-                price,
-                quantity,
-                margin,
-                stop_profit_condition,
-                stop_loss_condition,
-                stop_profit,
-                stop_loss,
-            )
-        }
+        self.trading.order(
+            self.product,
+            side,
+            price,
+            quantity,
+            margin,
+            stop_profit_condition,
+            stop_loss_condition,
+            stop_profit,
+            stop_loss,
+        )
     }
 
     /// 撤销委托。
@@ -771,12 +760,12 @@ impl<'a> Context<'a> {
     ///
     /// * `id` 委托 id，0 表示取消所有委托。
     pub fn cancel(&mut self, id: u64) -> bool {
-        unsafe { self.me.as_mut().unwrap().cancel(id) }
+        self.trading.cancel(id)
     }
 
     /// 获取余额。
     pub fn balance(&self) -> f64 {
-        unsafe { self.me.as_mut().unwrap().balance() }
+        self.trading.balance()
     }
 
     /// 获取委托。
@@ -784,18 +773,78 @@ impl<'a> Context<'a> {
     /// * `product` 委托 id。
     /// * `return` 委托的状态，如果委托不存在或者已经成交，则返回 None。
     pub fn delegate(&self, id: u64) -> Option<DelegateState> {
-        unsafe { self.me.as_mut().unwrap().delegate(id) }
+        self.trading.delegate(id)
     }
 
     /// 获取仓位。
     ///
     /// * `id` 委托 id。
     pub fn position(&self) -> Option<&Position> {
-        unsafe { self.me.as_mut().unwrap().position(self.product) }
+        self.trading.position(self.product)
     }
 }
 
-/// 张数，数量，比例
+/// 交易接口。
+pub trait Trading {
+    /// 委托。
+    /// 如果做多限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 如果做空限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平多限价小于市价，那么价格小于等于限价的时候才会成交。
+    /// 如果平空限价大于市价，那么价格大于等于限价的时候才会成交。
+    /// 做多的止盈触发价不能小于等于委托价格。
+    /// 做空的止盈触发价不能大于等于委托价格。
+    /// 做多的止损触发价不能大于等于委托价格。
+    /// 做空的止损触发价不能小于等于委托价格。
+    /// 限价平仓委托不会在当前 k 线被成交。
+    /// 平仓不会导致仓位反向开单，平仓数量只能小于等于现有持仓数量。
+    /// 如果在进行平仓操作后，现有的限价平仓委托的平仓量小于持仓量，则该委托将被撤销。
+    /// 平仓的止盈止损无效。
+    ///
+    /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
+    /// * `side` 委托方向。
+    /// * `price` 委托价格，0 表示市价，其他表示限价。
+    /// * `quantity` 委托数量，单位为币，如果是开仓，则 [`Unit::Ignore`] 表示使用 [`Config::quantity`] 的设置，如果是平仓，则 [`Unit::Ignore`] 表示全部仓位，[`Unit::Proportion`] 表示占用仓位的比例。
+    /// * `margin` 保证金，[`Unit::Ignore`] 表示使用 [`Config::margin`] 的设置，保证金乘以杠杆必须大于仓位价值，即 [`Config::margin`] * [`Config::lever`] >= [`Config::quantity`]，超出仓位价值部分的保证金当作追加保证金。
+    /// * `stop_profit_condition` 止盈触发价格，[`Unit::Ignore`] 表示不设置，且 `stop_profit` 无效。
+    /// * `stop_loss_condition` 止损触发价格，[`Unit::Ignore`] 表示不设置，且 `stop_loss` 无效。
+    /// * `stop_profit` 止盈委托价格，[`Unit::Ignore`] 表示不设置，其他表示限价。
+    /// * `stop_loss` 止损委托格，[`Unit::Ignore`] 表示不设置，其他表示限价。
+    /// * `return` 委托 id。
+    fn order(
+        &mut self,
+        product: &str,
+        side: Side,
+        price: f64,
+        quantity: Unit,
+        margin: Unit,
+        stop_profit_condition: Unit,
+        stop_loss_condition: Unit,
+        stop_profit: Unit,
+        stop_loss: Unit,
+    ) -> anyhow::Result<u64>;
+
+    /// 撤销委托。
+    /// 对于已成交的委托，将撤销止盈止损委托。
+    ///
+    /// * `id` 委托 id，0 表示取消所有委托。
+    fn cancel(&mut self, id: u64) -> bool;
+
+    /// 获取余额。
+    fn balance(&self) -> f64;
+
+    /// 获取委托。
+    ///
+    /// * `product` 委托 id。
+    /// * `return` 委托的状态，如果委托不存在或者已经成交，则返回 None。
+    fn delegate(&self, id: u64) -> Option<DelegateState>;
+
+    /// 获取仓位。
+    ///
+    /// * `id` 委托 id。
+    fn position(&self, product: &str) -> Option<&Position>;
+}
+
+/// 数量，比例
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Unit {
     /// 忽略。

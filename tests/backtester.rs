@@ -2,15 +2,17 @@ use auto_trading::*;
 
 #[tokio::test]
 async fn test_1() {
-    let k = include_str!("../BTC-USDT-SWAP-1m.json");
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
 
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str::<Vec<K>>(k).unwrap(),
-        0.01,
-        0.0,
-    );
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Week1,
+            k_convert(k, Level::Week1),
+            0.01,
+            0.0,
+        );
 
     let config = Config::new()
         .initial_margin(1000.0)
@@ -34,7 +36,7 @@ async fn test_1() {
     };
 
     let result = backtester
-        .start_convert(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Week1, 0)
+        .start_amplifier(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Week1, 0)
         .await;
 
     println!("{:#?}", result);
@@ -42,15 +44,17 @@ async fn test_1() {
 
 #[tokio::test]
 async fn test_2() {
-    let k = include_str!("../BTC-USDT-SWAP-1m.json");
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
 
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str::<Vec<K>>(k).unwrap(),
-        0.01,
-        0.0,
-    );
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            k_convert(k, Level::Hour4),
+            0.01,
+            0.0,
+        );
 
     let config = Config::new()
         .initial_margin(1000.0)
@@ -74,7 +78,7 @@ async fn test_2() {
     };
 
     let result = backtester
-        .start_convert(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Hour4, 0)
+        .start_amplifier(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Hour4, 0)
         .await;
 
     println!("{:#?}", result);
@@ -114,7 +118,7 @@ async fn test_3() {
     };
 
     let result = backtester
-        .start_convert(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour4, 0)
+        .start_amplifier(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour4, 0)
         .await;
 
     println!("{:#?}", result);
@@ -122,15 +126,17 @@ async fn test_3() {
 
 #[tokio::test]
 async fn test_4() {
-    let k = include_str!("../BTC-USDT-SWAP-4h.json");
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-4h.json")).unwrap();
 
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Hour4,
-        serde_json::from_str::<Vec<K>>(k).unwrap(),
-        0.01,
-        0.0,
-    );
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Hour4, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Hour12,
+            k_convert(k, Level::Hour12),
+            0.01,
+            0.0,
+        );
 
     let config = Config::new()
         .initial_margin(1000.0)
@@ -154,7 +160,7 @@ async fn test_4() {
     };
 
     let result = backtester
-        .start_convert(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour12, 0)
+        .start_amplifier(strategy, "BTC-USDT-SWAP", Level::Hour4, Level::Hour12, 0)
         .await;
 
     println!("{:#?}", result);
@@ -162,15 +168,17 @@ async fn test_4() {
 
 #[tokio::test]
 async fn test_5() {
-    let k = include_str!("../BTC-USDT-SWAP-1m.json");
+    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
 
-    let exchange = LocalExchange::new().push(
-        "BTC-USDT-SWAP",
-        Level::Minute1,
-        serde_json::from_str::<Vec<K>>(k).unwrap(),
-        0.01,
-        0.0,
-    );
+    let exchange = LocalExchange::new()
+        .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
+        .push(
+            "BTC-USDT-SWAP",
+            Level::Hour4,
+            k_convert(k, Level::Hour4),
+            0.01,
+            0.0,
+        );
 
     let config = Config::new()
         .initial_margin(1000.0)
@@ -195,7 +203,7 @@ async fn test_5() {
     };
 
     let result = backtester
-        .start_convert(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Hour4, 0)
+        .start_amplifier(strategy, "BTC-USDT-SWAP", Level::Minute1, Level::Hour4, 0)
         .await;
 
     println!("{:#?}", result);

@@ -635,6 +635,159 @@ where
     result
 }
 
+/// 快速计算 ema。
+pub struct EMACache {
+    last: f64,
+}
+
+impl EMACache {
+    pub fn new() -> Self {
+        Self { last: f64::NAN }
+    }
+
+    /// 计算 ema。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` ema。
+    pub fn ema(&mut self, source: &Source, length: usize) -> f64 {
+        self.last = if self.last.is_nan() {
+            ema(source, length)
+        } else {
+            if source.len() < length {
+                return f64::NAN;
+            }
+
+            let alpha = 2.0 / (length + 1) as f64;
+            alpha * source + (1.0 - alpha) * self.last
+        };
+        self.last
+    }
+}
+
+/// 快速计算 rma。
+pub struct RMACache {
+    last: f64,
+}
+
+impl RMACache {
+    pub fn new() -> Self {
+        Self { last: f64::NAN }
+    }
+
+    /// 计算 rma。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` rma。
+    pub fn rma(&mut self, source: &Source, length: usize) -> f64 {
+        self.last = if self.last.is_nan() {
+            rma(source, length)
+        } else {
+            if source.len() < length {
+                return f64::NAN;
+            }
+
+            let alpha = 1.0 / length as f64;
+            alpha * source + (1.0 - alpha) * self.last
+        };
+        self.last
+    }
+}
+
+/// 快速计算 macd。
+pub struct MACDCache {
+    short_ema: EMACache,
+    long_ema: EMACache,
+    dea_ema: EMACache,
+    dea: std::collections::VecDeque<f64>,
+}
+
+impl MACDCache {
+    pub fn new() -> Self {
+        Self {
+            short_ema: EMACache::new(),
+            long_ema: EMACache::new(),
+            dea_ema: EMACache::new(),
+            dea: std::collections::VecDeque::new(),
+        }
+    }
+
+    /// 计算 macd。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `short_length` 快线长度，当前长度必须等于前一个长度。
+    /// * `long_length` 慢线长度，当前长度必须等于前一个长度。
+    /// * `dea_length` dea 长度，当前长度必须等于前一个长度。
+    /// * `return` macd。
+    pub fn macd(
+        &mut self,
+        source: &Source,
+        short_length: usize,
+        long_length: usize,
+        dea_length: usize,
+    ) -> (f64, f64, f64) {
+        if source.len() < short_length || source.len() < long_length || source.len() < dea_length {
+            return (f64::NAN, f64::NAN, f64::NAN);
+        }
+
+        let dif = self.short_ema.ema(source, short_length) - self.long_ema.ema(source, long_length);
+        self.dea.push_front(dif);
+        let dea = self
+            .dea_ema
+            .ema(Source::new(&self.dea.as_slices().0), dea_length);
+        let macd = (dif - dea) * 2.0;
+        (dif, dea, macd)
+    }
+}
+
+/// 快速计算 rsi。
+pub struct RSICache {
+    u: std::collections::VecDeque<f64>,
+    d: std::collections::VecDeque<f64>,
+    u_rma: RMACache,
+    d_rma: RMACache,
+}
+
+impl RSICache {
+    pub fn new() -> Self {
+        Self {
+            u: std::collections::VecDeque::new(),
+            d: std::collections::VecDeque::new(),
+            u_rma: RMACache::new(),
+            d_rma: RMACache::new(),
+        }
+    }
+
+    /// 计算 rsi。
+    ///
+    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
+    /// * `length` 长度，当前长度必须等于前一个长度。
+    /// * `return` rsi。
+    pub fn rsi(&mut self, source: &Source, length: usize) -> f64 {
+        if source.len() < length {
+            return f64::NAN;
+        }
+
+        self.u.push_front({
+            let temp = source - source[1];
+            let temp = if temp.is_nan() { 0.0 } else { temp };
+            temp.max(0.0)
+        });
+
+        self.d.push_front({
+            let temp = source[1] - source;
+            let temp = if temp.is_nan() { 0.0 } else { temp };
+            temp.max(0.0)
+        });
+
+        let rs = self.u_rma.rma(Source::new(self.u.as_slices().0), length)
+            / self.d_rma.rma(Source::new(self.d.as_slices().0), length);
+
+        100.0 - 100.0 / (1.0 + rs)
+    }
+}
+
 /// 交易产品映射。
 /// BTC-USDT <-> BTCUSDT。
 /// BTC-USDT-SWAP <-> BTCUSDTSWAP。
@@ -1167,155 +1320,30 @@ where
     }
 }
 
-/// 快速计算 ema。
-pub struct EMACache {
-    last: f64,
-}
-
-impl EMACache {
-    pub fn new() -> Self {
-        Self { last: f64::NAN }
-    }
-
-    /// 计算 ema。
-    ///
-    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
-    /// * `length` 长度，当前长度必须等于前一个长度。
-    /// * `return` ema。
-    pub fn ema(&mut self, source: &Source, length: usize) -> f64 {
-        self.last = if self.last.is_nan() {
-            ema(source, length)
-        } else {
-            if source.len() < length {
-                return f64::NAN;
-            }
-
-            let alpha = 2.0 / (length + 1) as f64;
-            alpha * source + (1.0 - alpha) * self.last
-        };
-        self.last
-    }
-}
-
-/// 快速计算 rma。
-pub struct RMACache {
-    last: f64,
-}
-
-impl RMACache {
-    pub fn new() -> Self {
-        Self { last: f64::NAN }
-    }
-
-    /// 计算 rma。
-    ///
-    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
-    /// * `length` 长度，当前长度必须等于前一个长度。
-    /// * `return` rma。
-    pub fn rma(&mut self, source: &Source, length: usize) -> f64 {
-        self.last = if self.last.is_nan() {
-            rma(source, length)
-        } else {
-            if source.len() < length {
-                return f64::NAN;
-            }
-
-            let alpha = 1.0 / length as f64;
-            alpha * source + (1.0 - alpha) * self.last
-        };
-        self.last
-    }
-}
-
-/// 快速计算 macd。
-pub struct MACDCache {
-    short_ema: EMACache,
-    long_ema: EMACache,
-    dea_ema: EMACache,
-    dea: std::collections::VecDeque<f64>,
-}
-
-impl MACDCache {
-    pub fn new() -> Self {
-        Self {
-            short_ema: EMACache::new(),
-            long_ema: EMACache::new(),
-            dea_ema: EMACache::new(),
-            dea: std::collections::VecDeque::new(),
+pub fn to_html<A, B>(k: A, result: B) -> String
+where
+    A: AsRef<[K]>,
+    B: AsRef<[Position]>,
+{
+    let k = k.as_ref();
+    let result = result.as_ref();
+    let text =
+        include_str!("../template.txt").replace("{data}", &serde_json::to_string(k).unwrap());
+    let mut mark = String::new();
+    for i in result {
+        for i in &i.log {
+            mark += &format!(
+                "mark({},\"{}\",{});",
+                i.time,
+                match i.side {
+                    Side::BuyLong => "BuyLong",
+                    Side::SellShort => "SellShort",
+                    Side::BuySell => "BuySell",
+                    Side::SellLong => "SellLong",
+                },
+                i.price
+            );
         }
     }
-
-    /// 计算 macd。
-    ///
-    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
-    /// * `short_length` 快线长度，当前长度必须等于前一个长度。
-    /// * `long_length` 慢线长度，当前长度必须等于前一个长度。
-    /// * `dea_length` dea 长度，当前长度必须等于前一个长度。
-    /// * `return` macd。
-    pub fn macd(
-        &mut self,
-        source: &Source,
-        short_length: usize,
-        long_length: usize,
-        dea_length: usize,
-    ) -> (f64, f64, f64) {
-        if source.len() < short_length || source.len() < long_length || source.len() < dea_length {
-            return (f64::NAN, f64::NAN, f64::NAN);
-        }
-
-        let dif = self.short_ema.ema(source, short_length) - self.long_ema.ema(source, long_length);
-        self.dea.push_front(dif);
-        let dea = self
-            .dea_ema
-            .ema(Source::new(&self.dea.as_slices().0), dea_length);
-        let macd = (dif - dea) * 2.0;
-        (dif, dea, macd)
-    }
-}
-
-/// 快速计算 rsi。
-pub struct RSICache {
-    u: std::collections::VecDeque<f64>,
-    d: std::collections::VecDeque<f64>,
-    u_rma: RMACache,
-    d_rma: RMACache,
-}
-
-impl RSICache {
-    pub fn new() -> Self {
-        Self {
-            u: std::collections::VecDeque::new(),
-            d: std::collections::VecDeque::new(),
-            u_rma: RMACache::new(),
-            d_rma: RMACache::new(),
-        }
-    }
-
-    /// 计算 rsi。
-    ///
-    /// * `source` 数据系列，当前的 `source[1..]` 必须等于前一个 `source`。
-    /// * `length` 长度，当前长度必须等于前一个长度。
-    /// * `return` rsi。
-    pub fn rsi(&mut self, source: &Source, length: usize) -> f64 {
-        if source.len() < length {
-            return f64::NAN;
-        }
-
-        self.u.push_front({
-            let temp = source - source[1];
-            let temp = if temp.is_nan() { 0.0 } else { temp };
-            temp.max(0.0)
-        });
-
-        self.d.push_front({
-            let temp = source[1] - source;
-            let temp = if temp.is_nan() { 0.0 } else { temp };
-            temp.max(0.0)
-        });
-
-        let rs = self.u_rma.rma(Source::new(self.u.as_slices().0), length)
-            / self.d_rma.rma(Source::new(self.d.as_slices().0), length);
-
-        100.0 - 100.0 / (1.0 + rs)
-    }
+    text.replace("{mark}", &mark)
 }

@@ -1,5 +1,73 @@
 use crate::*;
 
+struct IndexIter<'a> {
+    k: &'a [K],
+    strategy_k: &'a [K],
+    k_index: usize,
+    strategy_index: usize,
+}
+
+impl<'a> IndexIter<'a> {
+    fn new(k: &'a [K], strategy_k: &'a [K]) -> Self {
+        Self {
+            k,
+            strategy_k,
+            k_index: k.len(),
+            strategy_index: strategy_k.len(),
+        }
+    }
+}
+
+impl<'a> Iterator for IndexIter<'a> {
+    type Item = (usize, usize);
+
+    /// 获取策略 k 线放大化后的起始和结尾的下标。
+    ///
+    /// ```
+    /// k = [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
+    /// strategy = [1000, 700, 400, 100]
+    /// Some((7, 3))
+    /// Some((4, 2))
+    /// Some((1, 1))
+    /// None
+    /// ```
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.strategy_k[..self.strategy_index] {
+            [.., start, _] => {
+                self.k_index = self.k[..self.k_index]
+                    .iter()
+                    .rposition(|v| v.time >= start.time)?;
+                self.strategy_index -= 1;
+                (self.k_index + 1 < self.k.len()).then_some((self.strategy_index, self.k_index + 1))
+            }
+            _ => None,
+        }
+    }
+}
+
+struct Scanner<'a> {
+    iter: IndexIter<'a>,
+    last: Option<(usize, usize)>,
+}
+
+impl<'a> Scanner<'a> {
+    fn new(k: &'a [K], strategy_k: &'a [K]) -> Self {
+        Self {
+            iter: IndexIter::new(k, strategy_k),
+            last: None,
+        }
+    }
+
+    fn get(&mut self) -> Option<(usize, usize)> {
+        self.last = self.last.or_else(|| self.iter.next());
+        self.last
+    }
+
+    fn next(&mut self) {
+        self.last = self.iter.next()
+    }
+}
+
 /// 回测器。
 pub struct Backtester<T> {
     exchange: T,
@@ -37,21 +105,20 @@ where
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
-        self.start_convert(strategy, product, strategy_level, strategy_level, range)
+        self.start_amplifier(strategy, product, strategy_level, strategy_level, range)
             .await
     }
 
     /// 开始回测。
-    /// 从交易所获取 `k_level` 时间级别的 k 线数据，然后调用 [`util::k_convert`] 转换到 `strategy_level` 时间级别使用。
-    /// 如果 `k_level` 等于 `strategy_level`，则不会发生转换。
+    /// 从交易所获取 `k_level` 和 strategy_level 时间级别的 k 线数据。
     ///
     /// * `strategy` 策略。
     /// * `product` 交易产品，例如，现货 BTC-USDT，合约 BTC-USDT-SWAP。
     /// * `k_level` k 线的时间级别，撮合引擎会以 k 线的时间级别来处理盈亏，强平，委托。
-    /// * `strategy_level` 策略的时间级别，即调用策略的时间周期，必须大于等于 k 线的时间级别。
+    /// * `strategy_level` 策略的时间级别，即调用策略的时间周期。
     /// * `range` 获取这个时间范围之内的数据，单位毫秒，0 表示获取所有数据，a..b 表示获取 a 到 b 范围的数据。
     /// * `return` 回测结果。
-    pub async fn start_convert<F, S, I>(
+    pub async fn start_amplifier<F, S, I>(
         &self,
         mut strategy: F,
         product: S,
@@ -64,102 +131,113 @@ where
         S: AsRef<str>,
         I: Into<TimeRange>,
     {
+        struct TradingImpl {
+            me: MatchEngine,
+        }
+
+        impl TradingImpl {
+            fn new(config: Config) -> Self {
+                Self {
+                    me: MatchEngine::new(config),
+                }
+            }
+        }
+
+        impl Trading for TradingImpl {
+            fn order(
+                &mut self,
+                product: &str,
+                side: Side,
+                price: f64,
+                quantity: Unit,
+                margin: Unit,
+                stop_profit_condition: Unit,
+                stop_loss_condition: Unit,
+                stop_profit: Unit,
+                stop_loss: Unit,
+            ) -> anyhow::Result<u64> {
+                self.me.order(
+                    product,
+                    side,
+                    price,
+                    quantity,
+                    margin,
+                    stop_profit_condition,
+                    stop_loss_condition,
+                    stop_profit,
+                    stop_loss,
+                )
+            }
+
+            fn cancel(&mut self, id: u64) -> bool {
+                self.me.cancel(id)
+            }
+
+            fn balance(&self) -> f64 {
+                self.me.balance()
+            }
+
+            fn delegate(&self, id: u64) -> Option<DelegateState> {
+                self.me.delegate(id)
+            }
+
+            fn position(&self, product: &str) -> Option<&Position> {
+                self.me.position(product)
+            }
+        }
+
+        anyhow::ensure!(
+            (k_level as u32) <= (strategy_level as u32),
+            "product: {}: strategy level must be greater than k level",
+            product.as_ref(),
+        );
+
         let product = product.as_ref();
+        let range = range.into();
         let min_size = self.exchange.get_min_size(product).await?;
         let min_notional = self.exchange.get_min_notional(product).await?;
-        let range = range.into();
-        let k_list = get_k_range(&self.exchange, product, k_level, range).await?;
+        let k = get_k_range(&self.exchange, product, k_level, range).await?;
 
-        let strategy_k_list = if k_level == strategy_level {
-            k_list.as_slice()
+        let strategy_k = if k_level == strategy_level {
+            unsafe { Vec::from_raw_parts(k.as_ptr().cast_mut(), k.len(), k.capacity()) }
         } else {
-            k_convert(&k_list, strategy_level).leak()
+            get_k_range(&self.exchange, product, strategy_level, range).await?
         };
 
-        let open = strategy_k_list.iter().map(|v| v.open).collect::<Vec<_>>();
-        let high = strategy_k_list.iter().map(|v| v.high).collect::<Vec<_>>();
-        let low = strategy_k_list.iter().map(|v| v.low).collect::<Vec<_>>();
-        let close = strategy_k_list.iter().map(|v| v.close).collect::<Vec<_>>();
+        let open = strategy_k.iter().map(|v| v.open).collect::<Vec<_>>();
+        let high = strategy_k.iter().map(|v| v.high).collect::<Vec<_>>();
+        let low = strategy_k.iter().map(|v| v.low).collect::<Vec<_>>();
+        let close = strategy_k.iter().map(|v| v.close).collect::<Vec<_>>();
 
-        let mut me = MatchEngine::new(self.config);
-        me.insert_product(product, min_size, min_notional);
+        let mut scanner = Scanner::new(&k, &strategy_k);
+        let mut ti = TradingImpl::new(self.config);
 
-        struct IndexIter<'a> {
-            k_list: &'a [K],
-            strategy_list: &'a [K],
-            k_index: usize,
-            strategy_index: usize,
-        }
+        ti.me.insert_product(product, min_size, min_notional);
 
-        impl<'a> IndexIter<'a> {
-            fn new(k_list: &'a [K], strategy_list: &'a [K]) -> Self {
-                Self {
-                    k_list,
-                    strategy_list,
-                    k_index: k_list.len(),
-                    strategy_index: strategy_list.len(),
-                }
-            }
-        }
-
-        impl<'a> Iterator for IndexIter<'a> {
-            type Item = (usize, usize);
-
-            fn next(&mut self) -> Option<Self::Item> {
-                // [1000, 900, 800, 700, 600, 500, 400, 300, 200, 100]
-                // [1000, 700, 400, 100]
-                // Some((7, 3))
-                // Some((4, 2))
-                // Some((1, 1))
-                // None
-                if let [.., start, _] = self.strategy_list[..self.strategy_index] {
-                    self.k_index = self.k_list[..self.k_index]
-                        .iter()
-                        .rposition(|v| v.time >= start.time)?;
-                    self.strategy_index -= 1;
-
-                    return (self.k_index + 1 < self.k_list.len())
-                        .then_some((self.k_index + 1, self.strategy_index));
-                }
-
-                None
-            }
-        }
-
-        let mut index_iter = IndexIter::new(&k_list, strategy_k_list);
-        let mut end_index = None;
-
-        for k_index in (0..k_list.len()).rev() {
-            me.ready(
+        for index in (0..k.len()).rev() {
+            ti.me.ready(
                 product,
                 K {
-                    time: k_list[k_index].time,
-                    open: k_list[k_index].open,
-                    high: k_list[k_index].high,
-                    low: k_list[k_index].low,
-                    close: k_list[k_index].close,
+                    time: k[index].time,
+                    open: k[index].open,
+                    high: k[index].high,
+                    low: k[index].low,
+                    close: k[index].close,
                 },
             );
 
-            if let Some((index, strategy_index)) = {
-                if k_level == strategy_level {
-                    Some((k_index, k_index))
-                } else {
-                    match end_index {
-                        Some(v) => Some(v),
-                        None => {
-                            end_index = index_iter.next();
-                            end_index
-                        }
-                    }
-                }
+            if let Some((start_index, end_index)) = if k_level == strategy_level {
+                Some((index, index))
+            } else {
+                scanner.get()
             } {
-                if k_index == index {
-                    let time = strategy_k_list[strategy_index].time;
-                    let open = Source::new(&open[strategy_index..]);
-                    let high = Source::new(&high[strategy_index..]);
-                    let low = Source::new(&low[strategy_index..]);
-                    let close = Source::new(&close[strategy_index..]);
+                if index == end_index {
+                    let time = strategy_k[start_index].time;
+                    let open = Source::new(&open[start_index..]);
+                    let high = Source::new(&high[start_index..]);
+                    let low = Source::new(&low[start_index..]);
+                    let close = Source::new(&close[start_index..]);
+
                     let mut cx = Context {
                         product,
                         min_size,
@@ -170,18 +248,18 @@ where
                         high,
                         low,
                         close,
-                        me: &mut me as *mut MatchEngine,
+                        trading: &mut ti,
                     };
 
                     strategy(&mut cx);
 
-                    end_index = None;
+                    scanner.next()
                 }
             }
 
-            me.update();
+            ti.me.update();
         }
 
-        Ok(me.history().clone())
+        Ok(ti.me.history().clone())
     }
 }
