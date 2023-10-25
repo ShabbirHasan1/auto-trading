@@ -1,6 +1,6 @@
 [package]
 name = "auto-trading"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
 description = "backtest, strategy, multiple platforms, quantitative trading framework"
 license = "Apache-2.0"
