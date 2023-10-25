@@ -40,6 +40,24 @@ pub fn highest(source: &Source, length: usize) -> f64 {
     result
 }
 
+pub fn highest_index(source: &Source, length: usize) -> Option<usize> {
+    if source.len() < length {
+        return None;
+    }
+
+    let mut result = source[0];
+    let mut index = 0;
+
+    for i in 1..length {
+        if source[i] > result {
+            result = source[i];
+            index = i;
+        }
+    }
+
+    Some(index)
+}
+
 pub fn lowest(source: &Source, length: usize) -> f64 {
     if source.len() < length {
         return f64::NAN;
@@ -54,6 +72,24 @@ pub fn lowest(source: &Source, length: usize) -> f64 {
     }
 
     result
+}
+
+pub fn lowest_index(source: &Source, length: usize) -> Option<usize> {
+    if source.len() < length {
+        return None;
+    }
+
+    let mut result = source[0];
+    let mut index = 0;
+
+    for i in 1..length {
+        if source[i] < result {
+            result = source[i];
+            index = i;
+        }
+    }
+
+    Some(index)
 }
 
 pub fn sma(source: &Source, length: usize) -> f64 {
@@ -1320,6 +1356,11 @@ where
     }
 }
 
+/// 回测结果转换到 html 文本。
+///
+/// * `k` k 线数据。
+/// * `result` 回测结果。
+/// * `return` html 文本。
 pub fn to_html<A, B>(k: A, result: B) -> String
 where
     A: AsRef<[K]>,
