@@ -172,21 +172,18 @@ async fn test_local() {
 #[tokio::test]
 async fn test_my() {
     let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-1m.json")).unwrap();
+    let k15 = k_convert(&k, Level::Minute15);
+    let k4 = k_convert(&k, Level::Hour4);
 
     let exchange = LocalExchange::new()
         .push("BTC-USDT-SWAP", Level::Minute1, k.clone(), 0.01, 0.0)
-        .push(
-            "BTC-USDT-SWAP",
-            Level::Minute15,
-            k_convert(&k, Level::Minute15),
-            0.01,
-            0.0,
-        );
+        .push("BTC-USDT-SWAP", Level::Minute15, k15.clone(), 0.01, 0.0)
+        .push("BTC-USDT-SWAP", Level::Hour4, k4.clone(), 0.01, 0.0);
 
     let config = Config::new()
         .initial_margin(1000.0)
         .quantity(Unit::Quantity(0.01))
-        .margin(Unit::Quantity(10.0))
+        // .margin(Unit::Quantity(10.0))
         .lever(100)
         .open_fee(0.0002)
         .close_fee(0.0005)
@@ -194,82 +191,91 @@ async fn test_my() {
 
     let backtester = Backtester::new(exchange, config);
 
-    let mut ema_cache = EMACache::new();
-    let mut macd_cache = MACDCache::new();
-    let mut rsi_cache = RSICache::new();
-    let mut last_macd = f64::NAN;
+    let strategy = |cx: &mut Context| {
+        // if cx.position().is_some() {
+        //     // 当前有仓位就不要判断了
+        //     return;
+        // }
+
+        if cx.open[2] < cx.close[2]
+            && cx.open[1] < cx.close[1]
+            && cx.open[0] < cx.close[0]
+            && cx.open[2] < cx.open[1]
+            && cx.open[1] < cx.open[0]
+            || cx.open[2] > cx.close[2]
+                && cx.open[1] > cx.close[1]
+                && cx.open[0] > cx.close[0]
+                && cx.open[2] > cx.open[1]
+                && cx.open[1] > cx.open[0]
+        {
+            fn check(arr: &[f64], epsilon: f64) -> bool {
+                if arr.is_empty() {
+                    return false;
+                }
+                let first_element = arr[0];
+                for element in arr.iter().skip(1) {
+                    if (element - first_element).abs() > epsilon {
+                        return false;
+                    }
+                }
+                true
+            }
+            let a = cx.high[2] - cx.low[2];
+            let b = cx.high[1] - cx.low[1];
+            let c = cx.high[0] - cx.low[0];
+            if check(&[a, b, c], 20.0) {
+                if cx.open[2] < cx.close[2] {
+                    match cx.order_profit_loss(
+                        Side::BuyLong,
+                        cx.close[0],
+                        Unit::Proportion(0.05),
+                        Unit::Quantity(cx.open[2]),
+                    ) {
+                        Ok(v) => {
+                            println!(
+                                "{} 做多 {:?}",
+                                time_to_string(cx.time),
+                                cx.delegate(v).unwrap()
+                            );
+                        }
+                        Err(v) => {
+                            println!("{} 做多 {}", time_to_string(cx.time), v);
+                        }
+                    }
+                } else {
+                    // match cx.order_profit_loss(
+                    //     Side::SellShort,
+                    //     cx.close[0],
+                    //     Unit::Proportion(0.03),
+                    //     Unit::Ignore,
+                    // ) {
+                    //     Ok(v) => {
+                    //         println!(
+                    //             "{} 做空 {:?}",
+                    //             time_to_string(cx.time),
+                    //             cx.delegate(v).unwrap()
+                    //         );
+                    //     }
+                    //     Err(v) => {
+                    //         println!("{} 做空 {}", time_to_string(cx.time), v);
+                    //     }
+                    // };
+                }
+            };
+        }
+    };
 
     let result = backtester
         .start_amplifier(
-            |cx| {
-                // close > ema 200
-                // macd short > long
-                // rsi14 >= 50
-                let ema200 = ema_cache.ema(cx.close, 200);
-                let (a, b, ..) = macd_cache.macd(cx.close, 12, 26, 9);
-                let rsi14 = rsi_cache.rsi(cx.close, 14);
-
-                if cx.close > ema200 {
-                    if a > b && last_macd <= b {
-                        if rsi14 > 50.0 && cx.position().is_none() {
-                            let low = lowest(cx.low, 7);
-                            let sp = cx.close + (cx.close - low) * 2.0;
-                            let result = cx.order_profit_loss(
-                                Side::BuyLong,
-                                0.0,
-                                Unit::Quantity(sp),
-                                Unit::Quantity(low),
-                            );
-                            println!(
-                                "做多 {} {} {} 止盈 {} 止损 {} {:?}",
-                                cx.time,
-                                time_to_string(cx.time),
-                                cx.close,
-                                sp,
-                                low,
-                                result
-                            );
-                        }
-                    }
-                }
-
-                if cx.close < ema200 {
-                    if a < b && last_macd >= b {
-                        if rsi14 < 50.0 && cx.position().is_none() {
-                            let high = highest(cx.high, 7);
-                            let sp = cx.close - (high - cx.close) * 2.0;
-                            let result = cx.order_profit_loss(
-                                Side::SellShort,
-                                0.0,
-                                Unit::Quantity(sp),
-                                Unit::Quantity(high),
-                            );
-                            println!(
-                                "做空 {} {} {} 止盈 {} 止损 {} {:?}",
-                                cx.time,
-                                time_to_string(cx.time),
-                                cx.close,
-                                sp,
-                                high,
-                                result
-                            );
-                        }
-                    }
-                }
-
-                last_macd = a;
-            },
+            strategy,
             "BTC-USDT-SWAP",
             Level::Minute1,
             Level::Minute15,
-            1688384956000..,
+            1636603200000..,
         )
         .await
         .unwrap();
 
-    // let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-4h.json")).unwrap();
-    std::fs::write("./index.html", to_html(&k, &result)).unwrap();
-    println!("所有盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
     let mut q = 0.0;
     let mut w = 0.0;
     let mut a = 0;
@@ -283,6 +289,11 @@ async fn test_my() {
             w += v.profit.abs();
         }
     });
+
+    println!("所有盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
     println!("盈亏比 {}", q / w);
-    println!("胜率 {}", a as f64 / b as f64);
+    println!("胜率 {}", a as f64 / (a + b) as f64);
+
+    std::fs::write("./仓位记录.txt", format!("{:#?}", result)).unwrap();
+    std::fs::write("./index.html", to_html(k15, result)).unwrap();
 }

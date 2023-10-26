@@ -1371,16 +1371,36 @@ where
     let text =
         include_str!("../template.txt").replace("{data}", &serde_json::to_string(k).unwrap());
     let mut mark = String::new();
-    for i in result {
-        for i in &i.log {
+    for p in result {
+        for (index, i) in p.log.iter().enumerate() {
             mark += &format!(
                 "mark({},\"{}\",{});",
                 i.time,
                 match i.side {
-                    Side::BuyLong => "BuyLong",
-                    Side::SellShort => "SellShort",
-                    Side::BuySell => "BuySell",
-                    Side::SellLong => "SellLong",
+                    Side::BuyLong =>
+                        if index == 0 {
+                            "BuyLong First"
+                        } else {
+                            "BuyLong +1"
+                        },
+                    Side::SellShort =>
+                        if index == 0 {
+                            "SellShort Start"
+                        } else {
+                            "SellShort +1"
+                        },
+                    Side::BuySell =>
+                        if index == p.log.len() - 1 {
+                            "BuySell All"
+                        } else {
+                            "BuySell -1"
+                        },
+                    Side::SellLong =>
+                        if index == p.log.len() - 1 {
+                            "SellLong All"
+                        } else {
+                            "SellLong -1"
+                        },
                 },
                 i.price
             );

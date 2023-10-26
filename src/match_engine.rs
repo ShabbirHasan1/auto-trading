@@ -461,7 +461,7 @@ impl MatchEngine {
                         } else {
                             match stop_profit {
                                 Unit::Quantity(b) => Price::LessThanLimit(a, b),
-                                _ => Price::GreaterThanMarket(a),
+                                _ => Price::LessThanMarket(a),
                             }
                         },
                         quantity,
@@ -750,7 +750,11 @@ impl MatchEngine {
         let mut handle =
             |k: &K, delegate_state: &mut DelegateState, position: &mut Option<Position>| {
                 let mut flag = 0;
-              
+
+                if k.time == 1692401400000 {
+                    println!("1")
+                }
+
                 macro_rules! remove_or_convert {
                     () => {
                         match delegate_state {
