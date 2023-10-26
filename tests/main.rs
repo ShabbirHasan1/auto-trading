@@ -267,7 +267,7 @@ async fn test_my() {
         .await
         .unwrap();
 
-    let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-4h.json")).unwrap();
+    // let k = serde_json::from_str::<Vec<K>>(include_str!("../BTC-USDT-SWAP-4h.json")).unwrap();
     std::fs::write("./index.html", to_html(&k, &result)).unwrap();
     println!("所有盈亏 {}", result.iter().map(|v| v.profit).sum::<f64>());
     let mut q = 0.0;

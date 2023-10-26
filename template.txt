@@ -78,7 +78,7 @@
     chart.applyNewData(data)
     klinecharts.registerOverlay({
       name: "mark",
-      totalStep: 1,
+      lock: true,
       createPointFigures: function (a) {
         let { coordinates, overlay } = a;
         let x = coordinates[2].x
@@ -169,19 +169,19 @@
     })
     function mark(time, text, value) {
       let data = this.data.findLast(v => v.timestamp <= time);
-	  chart.createOverlay({
-		name: "mark",
-		extendData: {
-		  text: text,
-		  high: data.high,
-		  low: data.low
-		},
-		points: [
-		  { timestamp: data.timestamp, value: data.high },
-		  { timestamp: data.timestamp, value: data.low },
-		  { timestamp: data.timestamp, value: value }
-		],
-	  })
+      chart.createOverlay({
+      name: "mark",
+      extendData: {
+        text: text,
+        high: data.high,
+        low: data.low
+      },
+      points: [
+          { timestamp: data.timestamp, value: data.high },
+          { timestamp: data.timestamp, value: data.low },
+          { timestamp: data.timestamp, value: value }
+        ],
+      })
     }
     {mark}
   </script>
