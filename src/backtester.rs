@@ -197,11 +197,13 @@ where
         let min_size = self.exchange.get_min_size(product).await?;
         let min_notional = self.exchange.get_min_notional(product).await?;
         let k = get_k_range(&self.exchange, product, k_level, range).await?;
+        let strategy_k;
 
         let strategy_k = if k_level == strategy_level {
-            unsafe { Vec::from_raw_parts(k.as_ptr().cast_mut(), k.len(), k.capacity()) }
+            k.as_slice()
         } else {
-            get_k_range(&self.exchange, product, strategy_level, range).await?
+            strategy_k = get_k_range(&self.exchange, product, strategy_level, range).await?;
+            strategy_k.as_slice()
         };
 
         let open = strategy_k.iter().map(|v| v.open).collect::<Vec<_>>();
